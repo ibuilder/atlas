@@ -279,3 +279,112 @@ def dispatch_pending_webhooks() -> dict:
 
     JOB_RUNS.labels("dispatch_pending_webhooks", "success").inc()
     return {"fanned_out": fanned, "delivered": delivered, "failed": failed, "dead_lettered": dead}
+
+
+@celery_app.task(name="atlas.billing.generate_recurring_charges")
+def generate_recurring_charges() -> dict:
+    """Raise the month's invoices from lease charge schedules.
+
+    Idempotent by watermark: a cycle already behind LeaseCharge.last_billed_through
+    is never billed again, so a re-run charges nobody twice.
+    """
+    from app.services.accounting.billing import generate_recurring_charges as run_billing
+
+    session = _session()
+    invoices = cycles = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                run = run_billing(session, org_id=organization.id)
+                invoices += len(run.invoices)
+                cycles += run.cycles_billed
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "recurring billing failed for an organization",
+                    extra={"event": "billing.failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("generate_recurring_charges", "success").inc()
+    return {"invoices": invoices, "cycles": cycles}
+
+
+@celery_app.task(name="atlas.collections.sweep_delinquency")
+def sweep_delinquency() -> dict:
+    """Escalate overdue invoices through the notice stages.
+
+    Idempotent by watermark: a stage already reached is never re-assessed, so a
+    late fee is charged once per invoice per stage rather than once per run.
+    """
+    from app.services.accounting.billing import sweep_delinquency as run_sweep
+
+    session = _session()
+    escalated = notices = fees = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                run = run_sweep(session, org_id=organization.id)
+                escalated += run.escalated
+                notices += len(run.notices)
+                fees += len(run.late_fees)
+                session.commit()
+            except Exception:  # noqa: BLE001
+                session.rollback()
+                log.exception(
+                    "delinquency sweep failed for an organization",
+                    extra={"event": "collections.failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("sweep_delinquency", "success").inc()
+    return {"escalated": escalated, "notices": notices, "late_fees": fees}
+
+
+@celery_app.task(name="atlas.owners.generate_statements")
+def generate_owner_statements(
+    period_start: str | None = None, period_end: str | None = None
+) -> dict:
+    """Generate owner statements for a closed period.
+
+    Idempotent: regenerating a period updates the existing statement rather than
+    creating a second one, so a corrected ledger can be restated.
+    """
+    import datetime as _dt
+
+    from app.services.accounting.statements import generate_statements_for_period
+
+    session = _session()
+    today = _dt.date.today()
+    first_of_this_month = today.replace(day=1)
+    start = (
+        _dt.date.fromisoformat(period_start)
+        if period_start
+        else ((first_of_this_month - _dt.timedelta(days=1)).replace(day=1))
+    )
+    end = (
+        _dt.date.fromisoformat(period_end)
+        if period_end
+        else (first_of_this_month - _dt.timedelta(days=1))
+    )
+
+    produced = 0
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                produced += len(
+                    generate_statements_for_period(
+                        session, org_id=organization.id, period_start=start, period_end=end
+                    )
+                )
+                session.commit()
+            except Exception:  # noqa: BLE001
+                session.rollback()
+                log.exception(
+                    "statement generation failed for an organization",
+                    extra={"event": "statements.failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("generate_owner_statements", "success").inc()
+    return {"statements": produced, "period": f"{start} to {end}"}

@@ -122,6 +122,11 @@ class AuditAction:
     LEASE_TERMINATED = "lease.terminated"
     LEASE_RENEWED = "lease.renewed"
 
+    # Collections
+    NOTICE_ISSUED = "notice.issued"
+    LATE_FEE_ASSESSED = "collections.late_fee_assessed"
+    DELINQUENCY_ESCALATED = "collections.escalated"
+
     # Accounting - the actions auditors actually ask about
     JOURNAL_POSTED = "ledger.journal_posted"
     JOURNAL_REVERSED = "ledger.journal_reversed"

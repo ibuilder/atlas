@@ -73,7 +73,9 @@ feature list is how a buyer discovers the gap during implementation.
 | Accounts payable | **Complete** | Bill recording with ledger posting, threshold-based approval routing, separation of duties enforced by identity, disbursement, and duplicate-invoice prevention. |
 | Bank reconciliation | **Modelled** | Reconciliation and exception schema exist; no matching engine. |
 | Trust accounting | **Partial** | Structural separation, flags, and constraints are enforced, and a trust account is refused as the source of an operating disbursement; no dedicated trust reconciliation yet. |
-| Owner statements and distributions | **Modelled** | Schema complete; no generator. |
+| Owner statements and distributions | **Complete** | Ownership is resolved *temporally*: a property sold mid-period apportions by days held, so both owners are paid for the days they owned it. Management fee and reserve retention computed; distribution refuses to exceed available cash less reserve, or to draw on a trust account. |
+| Recurring charge generation | **Complete** | Monthly billing from lease charge schedules, idempotent by watermark, with day-accurate proration for partial first and last months. |
+| Delinquency and late fees | **Complete** | Staged escalation honouring each lease's grace period; a late fee is assessed once per stage, not once per run. |
 | 1099 / tax reporting | **Modelled** | `is_1099_reportable` flags present; no year-end export. |
 
 ## Maintenance
@@ -93,9 +95,9 @@ feature list is how a buyer discovers the gap during implementation.
 | Capability | Status | Notes |
 |---|---|---|
 | Resident portal | **Partial** | Balance, lease, invoices, and request history render; payment submission is API-only. |
-| Owner portal | **Partial** | Properties, receivables, and open work render; statements are not generated. |
+| Owner portal | **Partial** | Properties, receivables, and open work render; statements generate and can be issued, but the portal does not yet render them. |
 | Vendor portal | **Partial** | Assigned work and compliance standing render; no field update UI. |
-| Messaging and notices | **Modelled** | Threads, messages, delivery evidence, and statutory deadlines are modelled; no service. |
+| Messaging and notices | **Partial** | Delinquency notices are issued with delivery evidence and statutory response deadlines; general messaging threads remain modelled only. |
 
 ## Documents and assets
 
@@ -129,7 +131,8 @@ feature list is how a buyer discovers the gap during implementation.
 | Vendor compliance refresh | **Complete** |
 | Audit chain verification | **Complete** |
 | Expired session and idempotency purge | **Complete** |
-| Recurring charge generation | **Modelled** (scheduled, not implemented) |
-| Delinquency sweep | **Modelled** (scheduled, not implemented) |
+| Recurring charge generation | **Complete** |
+| Delinquency sweep | **Complete** |
+| Owner statement generation | **Complete** |
 | Preventive maintenance generation | **Modelled** (scheduled, not implemented) |
 | Webhook dispatch | **Complete** |

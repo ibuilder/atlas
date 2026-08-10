@@ -10,6 +10,27 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ## [Unreleased]
 
+### Added
+
+- **Owner statements and distributions** (roadmap 2.4). Statements resolve
+  *temporal* ownership: a property sold mid-period apportions by days held, so
+  both the outgoing and incoming owner are paid for exactly the days they owned
+  it. Management fee and reserve retention are computed on the statement;
+  distributions post a balanced entry and refuse to draw on a trust account or
+  to exceed available cash less reserve. Regenerating an issued statement is
+  refused rather than silently restating history.
+- **Recurring charge generation** (roadmap 2.5). Monthly billing from lease
+  charge schedules, idempotent by a per-charge watermark: running the job twice
+  bills once, and a job that has not run for three months catches up on all
+  three. Partial first and last months prorate to the day against the real
+  length of that month.
+- **Delinquency sweep** (roadmap 2.6). Staged escalation (late notice → second
+  notice → pay-or-quit) honouring each lease's grace period, with the stage
+  column as the watermark so a late fee is assessed once per stage rather than
+  once per run. Every notice carries a delivery record.
+- Scheduled jobs for all three, wired into the beat schedule and isolated
+  per tenant: one organization's failure does not stop the sweep.
+
 ### Planned
 - Webhook delivery loop (the outbox, signing, and backoff schedule are modelled;
   the HTTP dispatcher is not yet implemented).

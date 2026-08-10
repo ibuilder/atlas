@@ -20,7 +20,7 @@ that reconciles.
 
 ---
 
-## 0.2.0 — Close the loop
+## 0.2.0 — Close the loop ✅ *shipped*
 
 The theme: every workflow that currently *stops* at a boundary should cross it.
 Documents exist but cannot be uploaded; bills exist but cannot be paid; events
@@ -32,9 +32,9 @@ current release a core rather than a product.
 | 2.1 | **Document storage and upload** ✅ | M | — |
 | 2.2 | **Webhook delivery** ✅ | S | — |
 | 2.3 | **Accounts payable: approval and disbursement** ✅ | M | — |
-| 2.4 | **Owner statements and distributions** | M | 2.3 |
-| 2.5 | **Recurring charge generation** | S | — |
-| 2.6 | **Delinquency sweep and notices** | S | 2.5 |
+| 2.4 | **Owner statements and distributions** ✅ | M | 2.3 |
+| 2.5 | **Recurring charge generation** ✅ | S | — |
+| 2.6 | **Delinquency sweep and notices** ✅ | S | 2.5 |
 
 **2.1 Document storage and upload.**
 Local and S3 adapters behind one interface. Content-type sniffing against the

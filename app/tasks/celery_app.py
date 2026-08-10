@@ -99,6 +99,11 @@ BEAT_SCHEDULE: dict[str, dict] = {
         "task": "atlas.webhooks.dispatch_pending",
         "schedule": 30.0,
     },
+    "generate-owner-statements": {
+        # Early on the first of the month, for the month just closed.
+        "task": "atlas.owners.generate_statements",
+        "schedule": crontab(day_of_month="1", hour=6, minute=0),
+    },
     "verify-audit-chains": {
         "task": "atlas.audit.verify_chains",
         "schedule": crontab(hour=1, minute=0),
