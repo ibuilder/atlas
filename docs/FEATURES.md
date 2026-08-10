@@ -34,6 +34,9 @@ feature list is how a buyer discovers the gap during implementation.
 
 | Capability | Status | Notes |
 |---|---|---|
+| OIDC single sign-on | **Complete** | Authorization code flow with PKCE. The state is a single-use database row, so a replayed callback cannot establish a second session. The ID token is *verified* - signature against the published keys, then issuer, audience, expiry and nonce - and `alg: none` or a symmetric algorithm is refused outright. |
+| SAML 2.0 | **Complete** | Signature verification is delegated to `signxml` and the module refuses to run without it: a subtly wrong XML-DSIG implementation accepts forged assertions while appearing to work. Verified against the *configured* certificate, not one embedded in the response. Audience restriction, validity window, and single-use assertion ids are all enforced. |
+| SCIM 2.0 provisioning | **Complete** | Deactivation revokes sessions in the same operation - inactive with a live session is offboarding that does not offboard. DELETE deactivates rather than removing, because a user id appears on ledger entries. An unsupported filter is refused rather than silently matching everything. |
 | Local authentication | **Complete** | Argon2id, transparent rehash, timing-equalised unknown-account path. |
 | TOTP multi-factor | **Complete** | Includes replay protection within a step, and single-use recovery codes. |
 | Session management | **Complete** | Server-side, individually revocable, idle timeout, invalidated on credential change. |

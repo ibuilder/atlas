@@ -510,3 +510,33 @@ def snapshot_kpis() -> dict:
 
     JOB_RUNS.labels("snapshot_kpis", "success").inc()
     return {"points": points, "as_of": yesterday.isoformat()}
+
+
+@celery_app.task(name="atlas.sso.purge_expired")
+def purge_sso_artifacts() -> dict:
+    """Clear spent sign-in states and expired replay guards.
+
+    Guard rows outlive their assertions deliberately, so a replay cannot slip
+    through by arriving just after the row was cleaned up.
+    """
+    from app.services.iam.oidc import purge_expired_states
+    from app.services.iam.saml import purge_replay_guards
+
+    session = _session()
+    states = guards = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                states += purge_expired_states(session, org_id=organization.id)
+                guards += purge_replay_guards(session, org_id=organization.id)
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "sso housekeeping failed for an organization",
+                    extra={"event": "sso.purge_failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("purge_sso_artifacts", "success").inc()
+    return {"states": states, "replay_guards": guards}

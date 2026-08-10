@@ -176,6 +176,13 @@ class User(TenantModel, SoftDeleteMixin):
     #: authentication can resolve an account before an organization is known,
     #: which is what makes a single sign-in page possible across all portals.
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    #: Set when the account came from, or is kept in step with, an external
+    #: directory. A directory-managed account is read-only here: a local edit
+    #: would either be reverted on the next sync or silently override an
+    #: offboarding, and neither is a defensible outcome.
+    external_id: Mapped[str | None] = mapped_column(String(255), index=True)
+    identity_provider_id: Mapped[str | None] = mapped_column(GUID, index=True)
+    is_directory_managed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     email_verified_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(120))

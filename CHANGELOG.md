@@ -12,6 +12,35 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **OIDC single sign-on** (roadmap 4.1). Authorization code flow with PKCE.
+  The state is a single-use database row rather than a cookie compared to
+  itself, so a replayed callback fails instead of establishing a second
+  session. The ID token is *verified*, not decoded: signature against the
+  provider's published keys, then issuer, audience, expiry, and nonce, with
+  `alg: none` and symmetric algorithms refused outright. A provider may only
+  speak for its configured email domains, and just-in-time provisioning is
+  refused entirely without at least one - otherwise a tenant's own IdP can
+  mint an account belonging to somebody else.
+- **SAML 2.0** (roadmap 4.2). Signature verification is delegated to `signxml`
+  and the module refuses to run without it. Hand-rolling XML-DSIG would mean
+  exclusive canonicalisation, reference resolution, and transform handling, and
+  a subtly wrong implementation accepts forged assertions while appearing to
+  work - so it is not attempted. Verification is against the *configured*
+  certificate rather than one embedded in the response, which proves only that
+  the sender can sign. Audience restriction, validity window, and single-use
+  assertion ids are enforced on top.
+- **SCIM 2.0 provisioning** (roadmap 4.3). Deactivation revokes the account's
+  sessions in the same operation: marking a user inactive while leaving a live
+  session is offboarding that does not offboard, and it is the usual way this
+  integration is got wrong. DELETE deactivates rather than removing, because a
+  user id appears on ledger entries and audit events. An unsupported filter is
+  refused rather than quietly ignored - silently returning everything to a
+  query meant to match one person is how a sync deactivates a whole company.
+- Migrations that add tenant-scoped tables now call
+  `migrations.support.rls.apply_tenant_policies()`. The original RLS migration
+  only saw the tables that existed when it ran, so without this a new table
+  sits outside the isolation boundary while looking entirely correct.
+
 - **KPI projections** (roadmap 4.6). Five metrics - occupancy, delinquency, SLA
   compliance, open work orders, net operating income - computed nightly into
   `KpiSnapshot` so dashboards stop contending with operational writes. Two

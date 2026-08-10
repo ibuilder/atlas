@@ -118,6 +118,10 @@ BEAT_SCHEDULE: dict[str, dict] = {
         "task": "atlas.reports.snapshot_kpis",
         "schedule": crontab(hour=0, minute=30),
     },
+    "purge-sso-artifacts": {
+        "task": "atlas.sso.purge_expired",
+        "schedule": crontab(hour=5, minute=30),
+    },
     "verify-audit-chains": {
         "task": "atlas.audit.verify_chains",
         "schedule": crontab(hour=1, minute=0),

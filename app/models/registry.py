@@ -32,6 +32,7 @@ from app.models import (  # noqa: F401  - imported for side effects
     reporting,
     resident,
     sequences,
+    sso,
     vendor,
 )
 from app.models.base import Base, BaseModel, TenantModel
