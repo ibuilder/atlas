@@ -87,7 +87,7 @@ feature list is how a buyer discovers the gap during implementation.
 | SLA tracking and breach detection | **Complete** | Deadlines stamped at creation; scheduled escalation job. |
 | Vendor dispatch with compliance gate | **Complete** | Refuses to assign work to a vendor whose insurance has lapsed. |
 | Inspections | **Modelled** | Templates, items, and offline-capture fields are modelled; no workflow. |
-| Preventive maintenance | **Modelled** | Schedules and calendar-correct recurrence are modelled; no generator. |
+| Preventive maintenance | **Complete** | Work orders raise inside the schedule's lead time, idempotent by watermark. A missed gap generates once rather than once per cycle missed, and a seasonal schedule that comes due out of season is deferred to its window rather than raised or lost. Generation is deliberately not recorded as completion. |
 | Turn management | **Modelled** | Represented through work orders; no turn-specific templates. |
 
 ## Residents, owners, vendors
@@ -135,5 +135,5 @@ feature list is how a buyer discovers the gap during implementation.
 | Delinquency sweep | **Complete** |
 | Owner statement generation | **Complete** |
 | Stale approval expiry | **Complete** |
-| Preventive maintenance generation | **Modelled** (scheduled, not implemented) |
+| Preventive maintenance generation | **Complete** |
 | Webhook dispatch | **Complete** |

@@ -12,6 +12,15 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Preventive maintenance generation** (roadmap 3.3). Work orders raise inside
+  the schedule's lead time, so the work can be booked rather than arriving
+  already late, and idempotently by watermark. Two behaviours are choices
+  rather than consequences: a job that has not run since March raises one
+  gutter clean and not five, and a seasonal schedule that comes due out of
+  season is deferred to its window rather than fired in July or dropped.
+  Generation is deliberately not recorded as completion - raising the order and
+  the boiler actually being serviced are different facts.
+
 - **Approvals workflow** (roadmap 3.2). One request-decide-act path for every
   sensitive action. A requester can never grant their own request. Expiry is
   checked when an approval is *used*, not only when it is granted - an approval

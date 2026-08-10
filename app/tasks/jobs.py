@@ -416,3 +416,35 @@ def expire_stale_approvals() -> dict:
 
     JOB_RUNS.labels("expire_stale_approvals", "success").inc()
     return {"expired": expired}
+
+
+@celery_app.task(name="atlas.maintenance.generate_preventive_work")
+def generate_preventive_work() -> dict:
+    """Raise work orders for preventive schedules whose lead time has opened.
+
+    Idempotent by watermark: a cycle already generated for is never generated
+    again, so a re-run produces no duplicate boiler service.
+    """
+    from app.services.maintenance.preventive import (
+        generate_preventive_work as run_generation,
+    )
+
+    session = _session()
+    generated = deferred = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                run = run_generation(session, org_id=organization.id)
+                generated += run.generated
+                deferred += run.deferred
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "preventive generation failed for an organization",
+                    extra={"event": "pm.failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("generate_preventive_work", "success").inc()
+    return {"generated": generated, "deferred": deferred}
