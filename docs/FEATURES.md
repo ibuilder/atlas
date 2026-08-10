@@ -35,6 +35,7 @@ feature list is how a buyer discovers the gap during implementation.
 
 | Capability | Status | Notes |
 |---|---|---|
+| Role administration console | **Complete** | Roles, their permissions, and who holds them; plus the reverse view, which is the question actually asked - "what can this person do?". Read-only: granting a role goes through the audited service path, because granting from a list is one mis-click from the wrong authority. Surfaces permissions no role holds, which a permission matrix answers badly. |
 | OIDC single sign-on | **Complete** | Authorization code flow with PKCE. The state is a single-use database row, so a replayed callback cannot establish a second session. The ID token is *verified* - signature against the published keys, then issuer, audience, expiry and nonce - and `alg: none` or a symmetric algorithm is refused outright. |
 | SAML 2.0 | **Complete** | Signature verification is delegated to `signxml` and the module refuses to run without it: a subtly wrong XML-DSIG implementation accepts forged assertions while appearing to work. Verified against the *configured* certificate, not one embedded in the response. Audience restriction, validity window, and single-use assertion ids are all enforced. |
 | SCIM 2.0 provisioning | **Complete** | Deactivation revokes sessions in the same operation - inactive with a live session is offboarding that does not offboard. DELETE deactivates rather than removing, because a user id appears on ledger entries. An unsupported filter is refused rather than silently matching everything. |
@@ -43,7 +44,7 @@ feature list is how a buyer discovers the gap during implementation.
 | Session management | **Complete** | Server-side, individually revocable, idle timeout, invalidated on credential change. |
 | API tokens | **Complete** | Hashed, prefixed, optional CIDR allowlist. |
 | Password reset | **Complete** | Single-use, superseding, does not reveal account existence. |
-| Role administration UI | **Modelled** | Roles and assignments are provisioned and enforced; no management screen. |
+| Role administration UI | **Complete** | Roles and assignments are provisioned and enforced; no management screen. |
 
 ## Portfolio
 

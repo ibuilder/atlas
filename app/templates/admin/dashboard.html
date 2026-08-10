@@ -1,6 +1,8 @@
 {# SPDX-License-Identifier: MIT #}
 {% extends "layouts/base.html" %}
-{% from "components/nav.html" import admin_nav %}
+{# `with context`: the macro calls can(), which arrives from a context
+   processor and is invisible to a macro imported without it. #}
+{% from "components/nav.html" import admin_nav with context %}
 {% block title %}Dashboard · {{ app_name }}{% endblock %}
 {% block heading %}Dashboard{% endblock %}
 {% block nav %}{{ admin_nav('dashboard') }}{% endblock %}

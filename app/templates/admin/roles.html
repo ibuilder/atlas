@@ -1,0 +1,76 @@
+{# Roles and who holds them. Read-only: granting a role is an audited service
+   operation, not a click. SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{# `with context`: the macro calls can(), which arrives from a context
+   processor and is invisible to a macro imported without it. #}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Roles · {{ app_name }}{% endblock %}
+{% block heading %}Roles and permissions{% endblock %}
+{% block nav %}{{ admin_nav('roles') }}{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Roles</h2>
+    <span class="panel__hint">{{ roles | length }} defined</span>
+  </div>
+
+  {% if roles %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Role</th><th>Code</th>
+            <th class="num">Permissions</th><th class="num">Holders</th>
+            <th>Scope</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for role in roles %}
+            <tr>
+              <td><a href="{{ url_for('admin.role_detail', role_id=role.id) }}">{{ role.name }}</a></td>
+              <td><code>{{ role.code }}</code></td>
+              <td class="num">{{ grants.get(role.id, []) | length }}</td>
+              <td class="num">{{ holders.get(role.id, []) | length }}</td>
+              <td>
+                {% if role.is_system %}
+                  <span class="pill pill--muted">System</span>
+                {% else %}
+                  <span class="pill">Custom</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No roles are defined for this organization.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Permissions nobody holds</h2>
+    <span class="panel__hint">{{ unassigned | length }} of {{ catalogue | length }}</span>
+  </div>
+  <p class="panel__note">
+    The question an auditor asks, and the one a permission matrix answers badly.
+    A capability granted to no role cannot be exercised by anyone.
+  </p>
+  {% if unassigned %}
+    <ul class="chips">
+      {% for code in unassigned %}<li class="chip"><code>{{ code }}</code></li>{% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">Every permission in the catalogue is granted to at least one role.</p>
+  {% endif %}
+</div>
+
+<p class="panel__note">
+  Roles are changed through the audited service path, not from this screen.
+  Granting from a list is one mis-click away from giving the wrong person the
+  wrong authority, and this view exists so that decision is made with the
+  current picture in front of you.
+</p>
+{% endblock %}

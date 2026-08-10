@@ -1,0 +1,95 @@
+{# One role: what it grants and who holds it. SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{# `with context`: the macro calls can(), which arrives from a context
+   processor and is invisible to a macro imported without it. #}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ role.name }} · {{ app_name }}{% endblock %}
+{% block heading %}{{ role.name }}{% endblock %}
+{% block nav %}{{ admin_nav('roles') }}{% endblock %}
+
+{% block topbar_meta %}
+<a class="btn btn--sm" href="{{ url_for('admin.roles') }}">All roles</a>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Definition</h2>
+    <span class="panel__hint"><code>{{ role.code }}</code></span>
+  </div>
+  {% if role.description %}<p class="panel__note">{{ role.description }}</p>{% endif %}
+  <p class="panel__note">
+    {% if role.is_system %}
+      A system role. Its permissions are reconciled on every deploy, so local
+      edits to them do not survive.
+    {% else %}
+      A custom role, defined by this organization.
+    {% endif %}
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Grants</h2>
+    <span class="panel__hint">{{ permissions | length }} permissions</span>
+  </div>
+  {% if permissions %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Permission</th><th>Description</th><th>Category</th><th></th></tr></thead>
+        <tbody>
+          {% for permission in permissions %}
+            <tr>
+              <td><code>{{ permission.code }}</code></td>
+              <td>{{ permission.description }}</td>
+              <td>{{ permission.category }}</td>
+              <td>
+                {% if permission.is_sensitive %}
+                  <span class="pill pill--warn">Sensitive</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">This role grants nothing. Anyone holding it can do no more than a signed-in stranger.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Holders</h2>
+    <span class="panel__hint">{{ assignments | length }} assignment(s)</span>
+  </div>
+  {% if assignments %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Person</th><th>Email</th><th>Scope</th><th>Granted</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for assignment, user in assignments %}
+            <tr>
+              <td>{{ user.full_name }}</td>
+              <td>{{ user.email }}</td>
+              <td>{{ assignment.scope_type }}</td>
+              <td>{{ assignment.granted_at.date() if assignment.granted_at else '' }}</td>
+              <td>
+                {% if assignment.revoked_at %}
+                  <span class="pill pill--muted">Revoked</span>
+                {% elif assignment.expires_at and assignment.expires_at < now %}
+                  <span class="pill pill--warn">Expired</span>
+                {% else %}
+                  <span class="pill pill--ok">Active</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nobody holds this role.</p>
+  {% endif %}
+</div>
+{% endblock %}

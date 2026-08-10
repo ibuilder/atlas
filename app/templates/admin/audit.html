@@ -1,7 +1,9 @@
 {# The audit trail, with a live integrity verdict from re-walking the hash chain.
    SPDX-License-Identifier: MIT #}
 {% extends "layouts/base.html" %}
-{% from "components/nav.html" import admin_nav %}
+{# `with context`: the macro calls can(), which arrives from a context
+   processor and is invisible to a macro imported without it. #}
+{% from "components/nav.html" import admin_nav with context %}
 {% block title %}Audit trail · {{ app_name }}{% endblock %}
 {% block heading %}Audit trail{% endblock %}
 {% block nav %}{{ admin_nav('audit') }}{% endblock %}

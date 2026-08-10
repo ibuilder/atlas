@@ -12,6 +12,25 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Role administration console** (roadmap 4.7). Roles with their permissions
+  and holders, and the reverse view - "what can this person do?" is the
+  question actually asked. Read-only by design: granting a role from a list is
+  one mis-click away from the wrong authority, so the change goes through the
+  audited service path and this view exists so the decision is made with the
+  current picture in front of you. It also surfaces permissions that no role
+  holds, which is what an auditor asks and what a permission matrix answers
+  badly.
+
+### Fixed
+
+- **The entire operations console returned 500.** Every admin template imported
+  the navigation macro without `with context`, so the macro could not see
+  `can()` - which arrives from a context processor - and raised
+  `UndefinedError` on render. Every page: dashboard, properties, work orders,
+  ledger, audit. It had never been caught because no test asked a console page
+  to render. There is now a parameterised test that renders all of them, and a
+  new page has to be added to its list.
+
 - **Bulk import with replay** (roadmap 4.4). Properties, units, and vendors
   from CSV, shaped around how this is actually used: somebody exports from
   their old system, half the rows fail on a date format, they fix the

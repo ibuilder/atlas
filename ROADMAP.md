@@ -131,7 +131,7 @@ receiving the books.
 
 ---
 
-## 0.4.0 — Enterprise readiness
+## 0.4.0 — Enterprise readiness ✅ *shipped*
 
 The theme: what a 500-property operator's IT function asks for before signing.
 
@@ -143,7 +143,7 @@ The theme: what a 500-property operator's IT function asks for before signing.
 | 4.4 | **Bulk import with replay** ✅ | M | 2.1 |
 | 4.5 | **Bank reconciliation workspace** ✅ | L | — |
 | 4.6 | **Reporting projections** ✅ | M | — |
-| 4.7 | **Role administration UI** | S | — |
+| 4.7 | **Role administration UI** ✅ | S | — |
 
 **4.5 Bank reconciliation** is the largest single item here and the one operators
 judge an accounting system by: statement import, candidate matching with a

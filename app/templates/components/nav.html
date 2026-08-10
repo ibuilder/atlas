@@ -16,6 +16,20 @@
   {% endif %}
 </div>
 
+{% if can('user.read') or can('role.read') %}
+<div class="sidebar__group">
+  <div class="sidebar__label">Administration</div>
+  {% if can('user.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.users') }}"
+       {% if active == 'users' %}aria-current="page"{% endif %}>People</a>
+  {% endif %}
+  {% if can('role.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.roles') }}"
+       {% if active == 'roles' %}aria-current="page"{% endif %}>Roles</a>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if can('ledger.read') or can('audit.read') %}
 <div class="sidebar__group">
   <div class="sidebar__label">Governance</div>

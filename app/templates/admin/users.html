@@ -1,0 +1,75 @@
+{# Who has access, and through which roles. SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{# `with context`: the macro calls can(), which arrives from a context
+   processor and is invisible to a macro imported without it. #}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}People · {{ app_name }}{% endblock %}
+{% block heading %}People and access{% endblock %}
+{% block nav %}{{ admin_nav('users') }}{% endblock %}
+
+{% block topbar_meta %}
+<form method="get" class="row">
+  <input type="search" name="q" value="{{ search }}" placeholder="Search name or email" aria-label="Search people">
+  <button class="btn btn--sm" type="submit">Search</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">People</h2>
+    <span class="panel__hint">{{ people | length }} shown</span>
+  </div>
+
+  {% if people %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Name</th><th>Email</th><th>Roles</th><th>Source</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for person in people %}
+            <tr>
+              <td>{{ person.full_name }}</td>
+              <td>{{ person.email }}</td>
+              <td>
+                {% set held = roles_by_user.get(person.id, []) %}
+                {% if held %}
+                  {{ held | join(', ') }}
+                {% else %}
+                  <span class="muted">No roles</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if person.is_directory_managed %}
+                  <span class="pill pill--muted" title="Managed by an external directory; local edits do not apply">Directory</span>
+                {% else %}
+                  <span class="pill">Local</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if person.status.value == 'active' %}
+                  <span class="pill pill--ok">Active</span>
+                {% elif person.status.value in ('locked', 'suspended') %}
+                  <span class="pill pill--warn">{{ person.status.value | capitalize }}</span>
+                {% else %}
+                  <span class="pill pill--muted">{{ person.status.value | capitalize }}</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nobody matches that search.</p>
+  {% endif %}
+</div>
+
+<p class="panel__note">
+  A person with no roles can sign in and see nothing: authorization here is
+  deny-by-default, so an empty list is a working state rather than a broken one.
+  Accounts marked <em>Directory</em> are owned by an external identity provider
+  and are read-only here, so an edit cannot silently override an offboarding.
+</p>
+{% endblock %}

@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
-from flask import Blueprint, render_template, request
+from flask import Blueprint, abort, render_template, request
 from flask_login import login_required
 from sqlalchemy import func, select
 
@@ -20,6 +20,13 @@ from app.extensions import db
 from app.middleware import require_org_scope
 from app.models.accounting import Invoice, InvoiceStatus
 from app.models.audit import AuditEvent
+from app.models.iam import (
+    Permission,
+    Role,
+    RoleAssignment,
+    RolePermission,
+    User,
+)
 from app.models.leasing import Lease, LeaseStatus
 from app.models.maintenance import WORK_ORDER_TERMINAL, MaintenanceRequest, WorkOrder
 from app.models.org import Property, Unit, UnitStatus
@@ -216,6 +223,158 @@ def audit() -> str:
         integrity = verify_chain(db.session, org_id=org_id)
 
     return render_template("admin/audit.html", events=events, integrity=integrity)
+
+
+# ---------------------------------------------------------------------------
+# Role administration
+# ---------------------------------------------------------------------------
+
+
+@admin_bp.get("/roles")
+@login_required
+def roles() -> str:
+    """Roles, their permissions, and who holds them.
+
+    Read-only by design. Granting a role from a screen is one click away from
+    granting the wrong one to the wrong person, so the *change* goes through
+    the service layer's audited path; this view exists so an administrator can
+    see the current picture before deciding, and answer "who can do this?"
+    without reading the database.
+    """
+    require(Perm.ROLE_READ)
+    org_id = require_org_scope()
+
+    role_rows = list(
+        db.session.execute(
+            select(Role).where(Role.org_id == org_id, Role.deleted_at.is_(None)).order_by(Role.name)
+        ).scalars()
+    )
+
+    # Permissions per role, and holders per role, in two queries rather than
+    # two per role: this page is small now and would degrade quietly otherwise.
+    grants: dict[str, list[str]] = {}
+    for role_id, code in db.session.execute(
+        select(RolePermission.role_id, RolePermission.permission_code).where(
+            RolePermission.org_id == org_id
+        )
+    ).all():
+        grants.setdefault(role_id, []).append(code)
+
+    holders: dict[str, list[tuple[str, str]]] = {}
+    for role_id, name, email in db.session.execute(
+        select(RoleAssignment.role_id, User.full_name, User.email)
+        .join(User, User.id == RoleAssignment.user_id)
+        .where(
+            RoleAssignment.org_id == org_id,
+            RoleAssignment.revoked_at.is_(None),
+            User.deleted_at.is_(None),
+        )
+        .order_by(User.full_name)
+    ).all():
+        holders.setdefault(role_id, []).append((name, email))
+
+    catalogue = list(
+        db.session.execute(
+            select(Permission).order_by(Permission.category, Permission.code)
+        ).scalars()
+    )
+
+    return render_template(
+        "admin/roles.html",
+        roles=role_rows,
+        grants={key: sorted(value) for key, value in grants.items()},
+        holders=holders,
+        catalogue=catalogue,
+        # Every permission nobody holds, which is the question an auditor asks
+        # and the one a permission matrix is bad at answering.
+        unassigned=sorted(
+            {permission.code for permission in catalogue}
+            - {code for codes in grants.values() for code in codes}
+        ),
+    )
+
+
+@admin_bp.get("/roles/<role_id>")
+@login_required
+def role_detail(role_id: str) -> str:
+    """One role: what it grants, and who holds it."""
+    require(Perm.ROLE_READ)
+    org_id = require_org_scope()
+
+    role = db.session.execute(
+        select(Role).where(Role.org_id == org_id, Role.id == role_id, Role.deleted_at.is_(None))
+    ).scalar_one_or_none()
+    if role is None:
+        abort(404)
+
+    permissions = list(
+        db.session.execute(
+            select(Permission)
+            .join(RolePermission, RolePermission.permission_code == Permission.code)
+            .where(RolePermission.org_id == org_id, RolePermission.role_id == role.id)
+            .order_by(Permission.category, Permission.code)
+        ).scalars()
+    )
+    assignments = list(
+        db.session.execute(
+            select(RoleAssignment, User)
+            .join(User, User.id == RoleAssignment.user_id)
+            .where(
+                RoleAssignment.org_id == org_id,
+                RoleAssignment.role_id == role.id,
+                User.deleted_at.is_(None),
+            )
+            .order_by(User.full_name)
+        ).all()
+    )
+
+    return render_template(
+        "admin/role_detail.html",
+        role=role,
+        permissions=permissions,
+        assignments=assignments,
+        # Passed rather than made a template global: one view needs it, and a
+        # global "now" is the sort of thing that quietly acquires callers.
+        now=utcnow(),
+    )
+
+
+@admin_bp.get("/users")
+@login_required
+def users() -> str:
+    """Who has access, and through which roles.
+
+    The reverse of the role view, and the one that actually gets used: the
+    question is almost always "what can this person do?" rather than "who is in
+    this role?".
+    """
+    require(Perm.USER_READ)
+    org_id = require_org_scope()
+
+    search = (request.args.get("q") or "").strip()
+    query = select(User).where(User.org_id == org_id, User.deleted_at.is_(None))
+    if search:
+        pattern = f"%{search.lower()}%"
+        query = query.where(
+            func.lower(User.full_name).like(pattern) | func.lower(User.email).like(pattern)
+        )
+
+    people = list(db.session.execute(query.order_by(User.full_name).limit(200)).scalars())
+
+    roles_by_user: dict[str, list[str]] = {}
+    for user_id, name in db.session.execute(
+        select(RoleAssignment.user_id, Role.name)
+        .join(Role, Role.id == RoleAssignment.role_id)
+        .where(RoleAssignment.org_id == org_id, RoleAssignment.revoked_at.is_(None))
+    ).all():
+        roles_by_user.setdefault(user_id, []).append(name)
+
+    return render_template(
+        "admin/users.html",
+        people=people,
+        roles_by_user={key: sorted(value) for key, value in roles_by_user.items()},
+        search=search,
+    )
 
 
 def _count(stmt) -> int:  # noqa: ANN001
