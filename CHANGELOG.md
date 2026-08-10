@@ -12,6 +12,19 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Bulk import with replay** (roadmap 4.4). Properties, units, and vendors
+  from CSV, shaped around how this is actually used: somebody exports from
+  their old system, half the rows fail on a date format, they fix the
+  spreadsheet and upload the whole thing again. So the entire file is validated
+  before anything is written - a partial import is worse than a failed one,
+  because the operator cannot tell which half landed - and rows are keyed by
+  natural business identifiers, so the second upload updates rather than
+  duplicating. Errors carry the spreadsheet's row number, because that is the
+  number the person is looking at. Two rows claiming the same record is an
+  error rather than a decision about which wins. Lives in
+  `app.services.imports` rather than `app.services.common`: the primitives
+  package is imported *by* services, so it must not import them back.
+
 - **OIDC single sign-on** (roadmap 4.1). Authorization code flow with PKCE.
   The state is a single-use database row rather than a cookie compared to
   itself, so a replayed callback fails instead of establishing a second

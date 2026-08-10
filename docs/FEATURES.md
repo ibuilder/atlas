@@ -19,6 +19,7 @@ feature list is how a buyer discovers the gap during implementation.
 
 | Capability | Status | Notes |
 |---|---|---|
+| Bulk import with replay | **Complete** | Properties, units, and vendors from CSV. The whole file is validated before anything is written, so a file with errors is rejected in full with a per-row report against the *spreadsheet's* row numbers - a partial import is worse than a failed one. Rows are keyed by natural business identifiers, so fixing the spreadsheet and re-uploading updates rather than duplicating. `plan_import()` reads only. |
 | Multi-organization tenancy | **Complete** | Three enforcement layers: service scoping, an ORM guard, and PostgreSQL row-level security applied by migration. A build-failing invariant catches a tenant table that escapes any of them. |
 | RBAC + ABAC authorization | **Complete** | Organization, portfolio, and property scopes; portal ownership predicates; exhaustive test matrix. |
 | Tamper-evident audit trail | **Complete** | Per-organization hash chain, verification endpoint, scheduled integrity check. |
