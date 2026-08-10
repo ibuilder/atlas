@@ -92,7 +92,7 @@ automating a workflow that cannot complete is worse than not automating it.
 | 3.1 | **Automation rule engine** ✅ | L | 0.2 |
 | 3.2 | **Approvals workflow** ✅ | S | 3.1 |
 | 3.3 | **Preventive maintenance generation** ✅ | S | — |
-| 3.4 | **Inspections** | M | 2.1 |
+| 3.4 | **Inspections** ✅ | M | 2.1 |
 | 3.5 | **Scheduled reports** | M | 2.1 |
 
 **3.1 Automation rule engine.**

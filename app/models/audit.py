@@ -151,6 +151,7 @@ class AuditAction:
     WORK_ORDER_ASSIGNED = "maintenance.work_order_assigned"
     WORK_ORDER_COMPLETED = "maintenance.work_order_completed"
     WORK_ORDER_SLA_BREACHED = "maintenance.sla_breached"
+    INSPECTION_SCHEDULED = "maintenance.inspection_scheduled"
     INSPECTION_COMPLETED = "maintenance.inspection_completed"
 
     # Vendors

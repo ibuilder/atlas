@@ -12,6 +12,19 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Inspection workflow** (roadmap 3.4). The checklist is copied onto the
+  inspection when it is scheduled rather than referenced, so a template edited
+  in March cannot change what a February inspection appears to have asked. An
+  item flagged `requires_photo` blocks sign-off without evidence linked to it -
+  but only when the finding is not a clean pass, because demanding a photo of
+  forty working light switches is how a checklist stops being filled in
+  honestly. Failed items raise work orders at a priority derived from severity,
+  guarded by the item's own reference so one broken window is one job however
+  many times the call is made. Offline replay is idempotent by construction:
+  findings upsert onto their item, and the device's capture time is kept rather
+  than the server's - the finding happened in the flat at 09:00, not at the
+  coffee shop at 14:00.
+
 - **Preventive maintenance generation** (roadmap 3.3). Work orders raise inside
   the schedule's lead time, so the work can be booked rather than arriving
   already late, and idempotently by watermark. Two behaviours are choices

@@ -86,7 +86,7 @@ feature list is how a buyer discovers the gap during implementation.
 | Work-order lifecycle | **Complete** | Validated state machine with an actor-attributed timeline. |
 | SLA tracking and breach detection | **Complete** | Deadlines stamped at creation; scheduled escalation job. |
 | Vendor dispatch with compliance gate | **Complete** | Refuses to assign work to a vendor whose insurance has lapsed. |
-| Inspections | **Modelled** | Templates, items, and offline-capture fields are modelled; no workflow. |
+| Inspections | **Complete** | The checklist is *copied* onto the inspection at scheduling, so a template edited afterwards cannot rewrite what a completed inspection appears to have asked. An item flagged `requires_photo` blocks sign-off without linked evidence - but only when the finding is not a clean pass, since photographing forty working light switches is how a checklist stops being filled in honestly. Failed items raise work orders, guarded by the item's own reference so one broken window is one job. Offline replay is idempotent by construction. |
 | Preventive maintenance | **Complete** | Work orders raise inside the schedule's lead time, idempotent by watermark. A missed gap generates once rather than once per cycle missed, and a seasonal schedule that comes due out of season is deferred to its window rather than raised or lost. Generation is deliberately not recorded as completion. |
 | Turn management | **Modelled** | Represented through work orders; no turn-specific templates. |
 
