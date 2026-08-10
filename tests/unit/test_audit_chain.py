@@ -11,7 +11,13 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select, update
 
-from app.models.audit import GENESIS_HASH, AuditEvent, AuditOutcome, canonical_json
+from app.models.audit import (
+    GENESIS_HASH,
+    AuditEvent,
+    AuditOutcome,
+    AuditSeverity,
+    canonical_json,
+)
 from app.services.audit.recorder import (
     diff_payload,
     record_audit_event,
@@ -183,3 +189,34 @@ def test_denied_outcomes_are_recorded(db, org, scope):
     )
     assert stored.outcome == AuditOutcome.DENIED
     assert stored.id == event.id
+
+
+@pytest.mark.parametrize(
+    ("field_name", "tampered"),
+    [
+        ("reason", "a different justification entirely"),
+        ("resource_label", "some other bill"),
+        ("severity", AuditSeverity.INFO),
+    ],
+)
+def test_the_chain_covers_what_an_investigation_reads(db, org, scope, field_name, tampered):
+    """A chain covering only the shape of an event says nothing about its
+    substance.
+
+    "Why was this approval rejected" lives in `reason`; which record it was
+    lives in `resource_label`; and downgrading a CRITICAL event to INFO is how
+    something stops being looked at. All three are inside the hash.
+    """
+    event = record_audit_event(
+        action="ap.bill_approved",
+        resource_type="Bill",
+        resource_label="bill 2026-0041",
+        severity=AuditSeverity.CRITICAL,
+        reason="the vendor is not compliant",
+        org_id=org.id,
+    )
+    db.session.commit()
+    assert event.is_intact
+
+    setattr(event, field_name, tampered)
+    assert not event.is_intact

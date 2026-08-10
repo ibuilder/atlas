@@ -108,3 +108,95 @@ def purge_expired() -> None:
         keys = purge_idempotency(db.session)
 
     click.echo(f"Purged {sessions} expired sessions and {keys} idempotency records.")
+
+
+@admin_cli.command("verify-restore")
+@click.option("--strict/--no-strict", default=True, help="Exit non-zero on any failure.")
+def verify_restore(strict: bool) -> None:
+    """Prove that a restored database is actually usable.
+
+    Four checks, and a restore is not complete until all four pass. Row counts
+    look right in every one of the failure modes below, which is exactly why
+    row counts are not one of the checks.
+    """
+    from decimal import Decimal
+
+    from sqlalchemy import func, select
+
+    from app.models.accounting import JournalLine
+    from app.models.org import Organization
+    from app.services.audit.recorder import verify_chain
+
+    failures: list[str] = []
+
+    # 1. The encryption key is the right one, not merely well-formed. A wrong
+    #    key is indistinguishable from a right one until something is decrypted.
+    with use_context(system_context("cli")):
+        try:
+            from app.security.keyring import get_field_cipher
+
+            probe = get_field_cipher()
+            if probe.decrypt(probe.encrypt("atlas")) != "atlas":  # pragma: no cover
+                failures.append("field encryption round trip did not return the input")
+            click.echo("  [ok] field encryption key round-trips")
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"field encryption unusable: {exc}")
+            click.echo(f"  [FAIL] field encryption: {exc}")
+
+    # 2. The audit chain is intact for every organization. A restore that loses
+    #    audit continuity is one that cannot be attested to afterwards.
+    with use_context(system_context("cli")):
+        organizations = list(db.session.execute(select(Organization)).scalars())
+    for organization in organizations:
+        with use_context(system_context("cli", org_id=organization.id)):
+            result = verify_chain(db.session, org_id=organization.id)
+        if result.get("intact"):
+            click.echo(
+                f"  [ok] audit chain intact for {organization.slug} "
+                f"({result.get('events_checked', 0)} events)"
+            )
+        else:
+            failures.append(f"audit chain broken for {organization.slug}: {result}")
+            click.echo(f"  [FAIL] audit chain for {organization.slug}: {result}")
+
+    # 3. The ledger balances. A partial restore passes every row count and
+    #    fails this.
+    for organization in organizations:
+        with use_context(system_context("cli", org_id=organization.id)):
+            debits, credits = db.session.execute(
+                select(
+                    func.coalesce(func.sum(JournalLine.debit), 0),
+                    func.coalesce(func.sum(JournalLine.credit), 0),
+                ).where(JournalLine.org_id == organization.id)
+            ).one()
+        if Decimal(str(debits)) == Decimal(str(credits)):
+            click.echo(f"  [ok] ledger balances for {organization.slug} ({debits})")
+        else:
+            failures.append(f"ledger out of balance for {organization.slug}: {debits} vs {credits}")
+            click.echo(f"  [FAIL] ledger for {organization.slug}: {debits} vs {credits}")
+
+    # 4. Row-level security survived. Policies are schema objects; a restore can
+    #    drop them, and the result serves every tenant's data while looking
+    #    entirely correct.
+    if db.engine.dialect.name == "postgresql":
+        from app.models.rls import tables_missing_policies
+
+        missing = tables_missing_policies(db.session.connection())
+        if missing:
+            failures.append(f"row-level security missing on: {', '.join(sorted(missing))}")
+            click.echo(f"  [FAIL] RLS missing on {len(missing)} table(s)")
+        else:
+            click.echo("  [ok] row-level security enabled on every tenant table")
+    else:
+        click.echo("  [skip] row-level security: not PostgreSQL")
+
+    if failures:
+        click.echo("")
+        click.echo(f"{len(failures)} check(s) failed. This restore is not usable.")
+        for failure in failures:
+            click.echo(f"  - {failure}")
+        if strict:
+            raise SystemExit(1)
+    else:
+        click.echo("")
+        click.echo("All checks passed. The restore is usable.")

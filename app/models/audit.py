@@ -205,12 +205,28 @@ def compute_entry_hash(
     action: str,
     resource_type: str | None,
     resource_id: str | None,
+    resource_label: str | None,
     actor_id: str | None,
     occurred_at: dt.datetime,
     outcome: str,
+    severity: str,
     payload: dict[str, Any] | None,
+    reason: str | None,
 ) -> str:
-    """Hash one audit entry, binding it to its predecessor."""
+    """Hash one audit entry, binding it to its predecessor.
+
+    Every field that carries meaning is covered. ``reason`` and
+    ``resource_label`` are in here because they are what an investigation
+    actually reads - "why was this approval rejected", "which bill was paid" -
+    and a chain that leaves them out is tamper-evident about the shape of an
+    event while saying nothing about its substance. ``severity`` is covered
+    because downgrading a CRITICAL event to INFO is how something stops being
+    looked at.
+
+    The purely operational columns - correlation id, IP address, user agent,
+    source, actor label - are deliberately excluded: they are diagnostic
+    context attached by the transport, not assertions about what happened.
+    """
     body = canonical_json(
         {
             "action": action,
@@ -219,9 +235,12 @@ def compute_entry_hash(
             "org_id": org_id,
             "outcome": outcome,
             "payload": payload or {},
+            "reason": reason,
             "resource_id": resource_id,
+            "resource_label": resource_label,
             "resource_type": resource_type,
             "sequence": sequence,
+            "severity": severity,
         }
     )
     return hashlib.sha256(f"{previous_hash}{body}".encode()).hexdigest()
@@ -305,10 +324,13 @@ class AuditEvent(TenantModel):
             action=self.action,
             resource_type=self.resource_type,
             resource_id=self.resource_id,
+            resource_label=self.resource_label,
             actor_id=self.actor_id,
             occurred_at=self.occurred_at,
             outcome=str(self.outcome),
+            severity=str(self.severity),
             payload=self.payload,
+            reason=self.reason,
         )
 
     @property

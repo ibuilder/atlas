@@ -114,10 +114,13 @@ def record_audit_event(
         action=action,
         resource_type=resource_type,
         resource_id=resource_id,
+        resource_label=resource_label,
         actor_id=actor_id,
         occurred_at=occurred_at,
         outcome=str(outcome),
+        severity=str(severity),
         payload=safe_payload,
+        reason=reason,
     )
 
     event = AuditEvent(

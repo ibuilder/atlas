@@ -79,11 +79,12 @@ protection · structured JSON logs with correlation IDs · Prometheus metrics ·
 probes.
 
 **Identity** — local auth with Argon2 · TOTP MFA with single-use recovery codes · device/session management and
-revocation · login throttling and lockout · single-use password reset · hashed API tokens · OIDC/SAML seams for
-enterprise SSO.
+revocation · login throttling and lockout · single-use password reset · hashed API tokens · OIDC and SAML 2.0
+single sign-on with SCIM directory provisioning.
 
-**Leasing** — leads, guest cards, applications, screening orchestration, configurable approval matrix, lease packets,
-charge schedules, renewals.
+**Leasing** — leads, guest cards, lease packets, and charge schedules driving recurring billing. Applications,
+screening orchestration, and renewals are modelled but have no workflow yet; see
+[docs/FEATURES.md](docs/FEATURES.md), which states the status of every claim on this page.
 
 **Accounting** — segmented chart of accounts, double-entry journal, trust accounts, AR invoices, AP bills, payments
 and payment application, bank reconciliation with an exception queue, period close with approval gating, owner
@@ -94,7 +95,8 @@ tracking and breach metrics, vendor assignment and invoice linkage, inspection c
 maintenance schedules, turn workflows.
 
 **Documents & assets** — pluggable object storage, content-type sniffing and size caps, malware-scan pipeline hook,
-signed expiring URLs, polymorphic document links, OCR pipeline, asset registry with warranties and service history.
+signed expiring URLs, polymorphic document links, lease and invoice extraction as reviewable suggestions, asset
+registry with warranties, service history, and capital planning.
 
 **Automation** — trigger → condition → actor → action rules with retry policies, escalation paths, human approval
 checkpoints, full run history, and a **dry-run harness** so a rule can be proven before it ever touches production data.

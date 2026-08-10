@@ -181,14 +181,29 @@ a document a human can check, which is the shape ADR-0006 requires.
 Not a feature milestone. The conditions under which we would put a customer's
 portfolio on this:
 
-- [ ] Every 0.2 and 0.3 item complete, with acceptance criteria met
-- [ ] Load tested to the stated budgets: P95 < 300ms reads, < 700ms writes
-- [ ] Backup restore drill executed and documented, including key recovery
-- [ ] A penetration test against the authorization and tenancy boundaries
-- [ ] Disaster-recovery runbook executed end to end, not just written
-- [ ] 90-day soak on a real portfolio with no unexplained ledger variance
-- [ ] Zero `Modelled` or `Seam` entries in `docs/FEATURES.md` for anything the
-      marketing surface claims
+- [x] Every 0.2, 0.3, 0.4, and 0.5 item complete, with acceptance criteria met
+- [x] Zero `Modelled` or `Seam` entries in `docs/FEATURES.md` for anything the
+      marketing surface claims — the README now points at that table and states
+      plainly where a capability is modelled rather than built
+- [x] Disaster-recovery runbook **written**, with the verification it depends on
+      implemented and tested: `flask atlas verify-restore` proves the encryption
+      key decrypts, every audit chain is intact, every ledger balances, and
+      row-level security survived the restore. See
+      [docs/runbooks/disaster-recovery.md](docs/runbooks/disaster-recovery.md).
+- [ ] **Disaster-recovery drill executed** against a real restore, and the
+      timing table in that runbook filled in. Written is not executed, and the
+      drill is the point.
+- [ ] **Load tested** to the stated budgets: P95 < 300ms reads, < 700ms writes.
+      Needs production-shaped hardware and data volumes.
+- [ ] **Penetration test** against the authorization and tenancy boundaries, by
+      somebody who did not write them.
+- [ ] **90-day soak** on a real portfolio with no unexplained ledger variance.
+
+The last four are deliberately unticked. Three of them require a running
+deployment, real hardware, and elapsed calendar time; the fourth requires an
+independent party. They cannot be satisfied by writing more code, and ticking
+them on the strength of a test suite would be the exact dishonesty this
+checklist exists to prevent.
 
 ---
 

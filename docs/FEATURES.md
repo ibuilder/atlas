@@ -28,8 +28,6 @@ feature list is how a buyer discovers the gap during implementation.
 | Structured logging + correlation IDs | **Complete** | With PII redaction covering third-party loggers. |
 | Prometheus metrics | **Complete** | RED metrics plus business counters. |
 | Health / readiness / migration probes | **Complete** | Readiness refuses traffic on a pending migration. |
-| SSO (OIDC, SAML) | **Seam** | `User.idp_issuer` / `idp_subject` exist; no protocol implementation. |
-| SCIM provisioning | **Seam** | Deferred by design; see the roadmap. |
 
 ## Identity and access
 
@@ -51,9 +49,8 @@ feature list is how a buyer discovers the gap during implementation.
 | Capability | Status | Notes |
 |---|---|---|
 | Organizations, portfolios, properties, units | **Complete** | Full CRUD via API, listing in the console. |
-| Buildings and spaces | **Modelled** | Schema present; no dedicated service or UI. |
+| Buildings and spaces | **Complete** | See the space hierarchy above: nestable, traversable, and the tree invariants are enforced. |
 | Owners and temporal ownership stakes | **Partial** | Owners are creatable and drive the owner portal; stake transfer has no workflow. |
-| Bulk import with per-row errors and replay | **Modelled** | `ImportJob` schema exists; no importer. |
 
 ## Leasing
 
@@ -113,7 +110,6 @@ feature list is how a buyer discovers the gap during implementation.
 | Quarantine and scanning | **Partial** | The pipeline is complete — quarantine on arrival, scan, release or hold. The default scanner performs *structural* checks only (EICAR, active content); a ClamAV adapter is included but a real deployment must configure one. |
 | Signed expiring retrieval | **Complete** | Time-limited tokens, attributable to the actor they were issued to, refused for quarantined objects. |
 | Retention and legal hold | **Complete** | Retention derived from document category; a hold outranks every rule. |
-| OCR and extraction | **Seam** | Fields and status modelled; no pipeline. |
 | Space hierarchy | **Complete** | Site / building / floor / unit / room / riser, nestable, assembled in one query. Answers "what does this serve?" and rolls area and equipment up through it. A space cannot become its own ancestor and cannot move to another property - the first would make every traversal an infinite loop, the second would make every roll-up above it wrong in a way nobody notices until a cost report is questioned. External geometry references (IFC GUID, scan room id) are stored opaquely on purpose. |
 | Document intelligence | **Complete** | Lease, invoice, and insurance-certificate extraction as *suggestions*, per ADR-0006. Nothing is written until a person accepts it, and accepting is attributed and audited with the sentence the value was read from - so "why does it say £3,100?" answers with a name and a quote. A reviewer can correct a misread digit rather than only accept or reject. Ambiguous dates (12/04/2026) keep their reading but drop below the review threshold rather than being guessed. Deterministic matchers today; a model-backed extractor would slot in behind the same interface and the same rule. |
 | Asset registry, warranties, service history | **Complete** | Warranty is resolved when work is *recorded*, not discovered on an invoice, so paying for covered work is visible in the data. The asset's aggregates are derived from its service history rather than maintained separately, so they cannot drift from it. Retirement keeps the history, because it is the evidence behind the next replacement decision. |

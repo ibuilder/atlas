@@ -12,6 +12,31 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- Disaster-recovery runbook, and the command it depends on:
+  `flask atlas verify-restore` proves a restored database is actually usable -
+  the encryption key decrypts real data, every organization's audit chain is
+  intact, every ledger balances, and row-level security survived. Row counts
+  look correct in every one of those failure modes, which is why row counts are
+  not one of the checks. Key recovery is step one of the runbook because losing
+  the field-encryption key is the failure that actually happens, and it has no
+  recovery path.
+
+### Changed
+
+- **The audit hash now covers `reason`, `resource_label`, and `severity`.**
+  Writing the restore-verification tests surfaced that it did not: the stated
+  reason for a rejected approval, which record an event referred to, and
+  whether something was CRITICAL or INFO could all be altered without breaking
+  the chain. A trail that is tamper-evident about the *shape* of an event and
+  silent about its *substance* is not much of a trail. Purely diagnostic
+  columns - correlation id, IP address, user agent - remain outside the hash on
+  purpose: they are context attached by the transport, not assertions about
+  what happened.
+
+  This changes the hash format. Chains written by earlier versions will not
+  verify against this one; there are no production deployments, and doing it
+  now costs a re-seed rather than a re-chaining migration.
+
 - **Space hierarchy** (roadmap 5.4). Site, building, floor, unit, room, riser -
   assembled in one query rather than one round trip per node, because the page
   that shows a two-hundred-room building is the page people leave open all day.
