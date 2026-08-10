@@ -1,0 +1,105 @@
+# Local orchestration: Postgres, Redis, web, worker, and beat.
+#
+# `docker compose up --build` gives you the same component topology as a
+# deployment, so the first time you meet a broker or a migration is not in
+# production.
+#
+# SPDX-License-Identifier: MIT
+
+name: atlas
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: infra/docker/Dockerfile
+  environment: &app-env
+    ATLAS_ENV: ${ATLAS_ENV:-development}
+    DATABASE_URL: postgresql+psycopg://atlas:atlas@db:5432/atlas
+    REDIS_URL: redis://redis:6379/0
+    SECRET_KEY: ${SECRET_KEY:-local-development-secret-key-not-for-production-use}
+    FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:-}
+    WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:-local-development-webhook-secret-value}
+    FORCE_HTTPS: "false"
+    SESSION_COOKIE_SECURE: "false"
+    LOG_FORMAT: ${LOG_FORMAT:-console}
+    STORAGE_LOCAL_PATH: /app/instance/storage
+  volumes:
+    - atlas-instance:/app/instance
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: atlas
+      POSTGRES_DB: atlas
+    ports:
+      - "5432:5432"
+    volumes:
+      - atlas-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - atlas-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    <<: *app
+    # Migrations run before the server accepts traffic, and the demo tenant is
+    # seeded only if it is not already there.
+    command: >
+      sh -c "alembic upgrade head &&
+             flask --app wsgi seed demo &&
+             gunicorn wsgi:app --bind 0.0.0.0:8000 --workers 2 --worker-class gthread
+             --threads 4 --access-logfile - --error-logfile -"
+    ports:
+      - "5000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "app.tasks.celery_app:make_celery()", "worker", "--loglevel=info", "--concurrency=2"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+  beat:
+    <<: *app
+    command: ["celery", "-A", "app.tasks.celery_app:make_celery()", "beat", "--loglevel=info"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+
+volumes:
+  atlas-db:
+  atlas-redis:
+  atlas-instance:

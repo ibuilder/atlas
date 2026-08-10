@@ -1,0 +1,74 @@
+# Security
+
+## Reporting a vulnerability
+
+Please **do not open a public issue**. Report privately through
+[GitHub Security Advisories](https://github.com/ibuilder/atlas/security/advisories/new).
+
+Include what you can: affected version or commit, reproduction steps, impact,
+and any proof of concept. Expect an acknowledgement within three working days
+and an assessment within ten. We will credit you in the advisory unless you
+prefer otherwise, and we will not pursue action against good-faith research that
+stays within your own deployment.
+
+## What Atlas enforces
+
+| Control | Where |
+|---|---|
+| Tenant isolation | Service scoping, an ORM guard, and a build-failing schema invariant. Cross-tenant access returns `404`, never `403`. |
+| Deny-by-default authorization | `app/security/policies.py`. Unknown actions fail closed. |
+| Tamper-evident audit | Per-organization SHA-256 chain; modification or deletion is refused and detectable. |
+| Password storage | Argon2id, tuned by configuration, rehashed transparently on upgrade. |
+| MFA | TOTP with replay protection; sensitive actions require a *fresh* assertion. |
+| Session control | Server-side, individually revocable; all sessions die on password change. |
+| Field encryption | MFA seeds, tax identifiers, government IDs, bank details. Keys rotate without downtime. |
+| Transport and headers | HSTS, a CSP with no `unsafe-inline`, `nosniff`, `DENY` framing, isolated cross-origin policies. |
+| Input validation | Strict schemas that reject unknown fields; HTML stripped at the boundary. |
+| Rate limiting | Per identity when authenticated, per IP otherwise. |
+| Idempotency | Retried writes replay; the same key with a different body is rejected. |
+| Secrets | Configuration only, typed as `SecretStr`. Production refuses to start on a weak or placeholder secret. |
+
+## Deployment expectations
+
+Atlas fails closed at startup, but it cannot enforce the environment around it.
+
+- Terminate TLS in front of the app and set `TRUSTED_PROXY_COUNT` to the **real**
+  number of proxies. A larger number lets a client forge its own source IP,
+  which silently defeats rate limiting and IP allowlists.
+- Supply `SECRET_KEY` and `FIELD_ENCRYPTION_KEY` from a secret manager. Losing
+  the encryption key makes encrypted columns unrecoverable; there is no
+  backdoor, by design.
+- Set `METRICS_TOKEN`. `/metrics` exposes tenant counts and revenue-shaped
+  counters.
+- Enable PostgreSQL row-level security (`DB_ENABLE_RLS=true`) and run the
+  application as a role that is subject to it — not as the table owner, which
+  bypasses RLS.
+- Restrict database network access. Isolation layers 1 and 2 live in the
+  application; only RLS protects against a direct connection.
+- Back up and **test restoring**. An untested backup is a hypothesis.
+
+## Known limitations in 0.1.0
+
+Stated plainly rather than left to be discovered:
+
+- **PostgreSQL RLS policies are not yet in a migration.** The design assumes
+  three isolation layers; two are implemented and tested. Treat the database
+  network boundary as load-bearing until the RLS migration lands.
+- **No SSO.** `idp_issuer` and `idp_subject` exist on `User`; no protocol
+  implementation. Enterprise deployments needing SAML or OIDC should wait.
+- **Document upload is not implemented.** Malware scanning and quarantine are
+  modelled but not wired, so no file-handling path is live to attack — and none
+  is available to use.
+- **The automation engine does not execute.** Rules can be stored but not run,
+  so no automated action can fire unexpectedly.
+- **Webhook delivery does not send.** Nothing leaves the system over that path.
+
+## Cryptography
+
+Argon2id for passwords. SHA-256 for high-entropy tokens (there is nothing to
+brute-force, and constant-time lookup by digest is required). Fernet
+(AES-128-CBC + HMAC-SHA256) for field encryption. HMAC-SHA256 for webhook
+signatures. SHA-256 for the audit chain.
+
+No custom cryptographic constructions. Everything comes from `cryptography`,
+`argon2-cffi`, or the standard library.

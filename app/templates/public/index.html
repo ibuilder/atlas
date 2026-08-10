@@ -1,0 +1,65 @@
+{# Public landing surface.
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/brand.html" import wordmark %}
+{% block title %}{{ app_name }} · {{ app_tagline }}{% endblock %}
+
+{% block body %}
+<div class="centred">
+  {{ wordmark(60) }}
+
+  <div class="hero stack">
+    <h1 class="hero__title">Property intelligence, made operational.</h1>
+    <p class="lede">
+      Leasing, accounting, maintenance, owners, vendors, documents, and assets
+      in one governed operating system — connected to the same property record,
+      the same financial record, and the same asset history.
+    </p>
+  </div>
+
+  <hr class="rule">
+
+  <div class="pillars">
+    <div class="panel">
+      <div class="pillar__name">Orient</div>
+      <p class="small muted mb-0">
+        Portfolio, property, unit, lease, owner, vendor, and resident tied to
+        one governed record.
+      </p>
+    </div>
+    <div class="panel">
+      <div class="pillar__name">Coordinate</div>
+      <p class="small muted mb-0">
+        Work orders, approvals, invoices, notices, and reports connected to real
+        operational context.
+      </p>
+    </div>
+    <div class="panel">
+      <div class="pillar__name">Account</div>
+      <p class="small muted mb-0">
+        Every financial and operational action reviewable, permissioned, and
+        auditable.
+      </p>
+    </div>
+  </div>
+
+  <div class="chain mt-6">
+    <span class="chain__step">Property &amp; unit</span>
+    <span class="chain__arrow">→</span>
+    <span class="chain__step">Lease &amp; resident</span>
+    <span class="chain__arrow">→</span>
+    <span class="chain__step">Work order &amp; vendor</span>
+    <span class="chain__arrow">→</span>
+    <span class="chain__step">Invoice &amp; ledger</span>
+    <span class="chain__arrow">→</span>
+    <span class="chain__step">Document &amp; audit trail</span>
+  </div>
+
+  <div class="row mt-6">
+    <a class="btn btn--primary" href="{{ url_for('auth.login_form') }}">Sign in</a>
+    <a class="btn" href="{{ url_for('openapi.docs') }}">API reference</a>
+  </div>
+
+  <p class="tiny dim mt-6">&copy; {{ current_year }} {{ app_name }} · MIT licensed</p>
+</div>
+{% endblock %}

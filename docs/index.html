@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atlas — Property intelligence, made operational.</title>
+<meta name="description" content="An enterprise property management operating system. Leasing, accounting, maintenance, owners, vendors, documents, and assets in one governed operating model.">
+<meta property="og:title" content="Atlas — Property intelligence, made operational.">
+<meta property="og:description" content="Leasing, accounting, maintenance, owners, vendors, documents, and assets in one governed operating system.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='14' fill='%2317181A'/%3E%3Ccircle cx='50' cy='50' r='30' fill='none' stroke='%23F3EEE5' stroke-width='2'/%3E%3Cpath d='M50 12 L56 46 L50 51 L44 46 Z' fill='%23A66345'/%3E%3Cpath d='M50 88 L44 54 L50 49 L56 54 Z' fill='%23F3EEE5'/%3E%3Cpath d='M12 50 L46 44 L51 50 L46 56 Z' fill='%23F3EEE5'/%3E%3Cpath d='M88 50 L54 56 L49 50 L54 44 Z' fill='%23F3EEE5'/%3E%3Ccircle cx='80' cy='50' r='3' fill='%234867A9'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#17181A; --bg-deep:#111214; --surface:#232427; --surface-2:#2b2c30;
+  --text:#F3EEE5; --text-2:#D8D1C7; --muted:#A7A09A;
+  --copper:#A66345; --copper-lit:#C07D5B; --blue:#4867A9; --parchment:#E4D6C2;
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.18);
+  --good:#5C9B74; --warn:#C2913F; --bad:#B8574A;
+  --serif:"Cormorant Garamond","Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  --sans:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --max:1120px;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--copper-lit);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+h1,h2,h3{font-family:var(--serif);font-weight:400;line-height:1.15;margin:0 0 .5em}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+section{padding:88px 0;border-top:1px solid var(--line)}
+.eyebrow{font-size:.7rem;letter-spacing:.24em;text-transform:uppercase;color:var(--copper);margin-bottom:16px}
+.lede{font-size:1.15rem;color:var(--text-2);max-width:64ch}
+.muted{color:var(--muted)}
+.small{font-size:.9rem}
+.tiny{font-size:.78rem}
+
+/* hero */
+.hero{text-align:center;padding:112px 0 96px;background:
+  radial-gradient(1000px 500px at 50% -10%, rgba(166,99,69,.16), transparent 65%),
+  radial-gradient(700px 400px at 80% 10%, rgba(72,103,169,.10), transparent 60%),
+  var(--bg-deep);
+  border-top:0}
+.mark{display:block;margin:0 auto 28px}
+.wordmark{font-family:var(--serif);font-size:clamp(2.6rem,9vw,4.6rem);letter-spacing:.34em;text-indent:.34em;margin:0 0 6px}
+.sub{font-size:.74rem;letter-spacing:.32em;text-transform:uppercase;color:var(--copper);margin-bottom:26px}
+.rule{position:relative;height:1px;background:var(--line-2);max-width:420px;margin:0 auto 26px}
+.rule::after{content:"";position:absolute;left:50%;top:-1px;width:44px;height:3px;transform:translateX(-50%);background:var(--blue)}
+.tagline{font-family:var(--serif);font-size:clamp(1.5rem,4vw,2.2rem);color:var(--text);margin:0 0 18px}
+.hero p{max-width:62ch;margin:0 auto 28px;color:var(--text-2)}
+.cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-block;padding:12px 26px;border:1px solid var(--line-2);border-radius:4px;color:var(--text);font-size:.94rem}
+.btn:hover{border-color:var(--copper);color:var(--copper-lit);text-decoration:none}
+.btn--primary{background:var(--copper);border-color:var(--copper);color:#16120d;font-weight:600}
+.btn--primary:hover{background:var(--copper-lit);border-color:var(--copper-lit);color:#16120d}
+
+/* layout helpers */
+.grid{display:grid;gap:22px}
+.g3{grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.g2{grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:26px}
+.card h3{font-size:1.25rem;color:var(--copper-lit);margin-bottom:10px}
+.card p{margin:0;color:var(--text-2);font-size:.95rem}
+
+/* chain */
+.chain{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;margin-top:34px}
+.chain span{padding:7px 15px;border:1px solid var(--line);border-radius:999px;font-size:.85rem;color:var(--text-2);background:var(--surface)}
+.chain i{color:var(--copper);font-style:normal}
+
+/* app preview */
+.app{border:1px solid var(--line-2);border-radius:10px;overflow:hidden;background:var(--bg-deep);box-shadow:0 24px 70px rgba(0,0,0,.5)}
+.app__bar{display:flex;align-items:center;gap:8px;padding:11px 15px;background:var(--surface);border-bottom:1px solid var(--line)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--line-2)}
+.app__title{margin-left:12px;font-size:.78rem;color:var(--muted);font-family:var(--mono)}
+.app__body{display:flex;min-height:400px}
+.app__nav{width:186px;flex:none;border-right:1px solid var(--line);padding:18px 12px;background:var(--surface)}
+.navlabel{font-size:.6rem;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+.navitem{padding:8px 10px;border-radius:4px;font-size:.86rem;color:var(--text-2)}
+.navitem.on{background:var(--surface-2);color:var(--text);box-shadow:inset 2px 0 0 var(--copper)}
+.app__main{flex:1;padding:22px;min-width:0}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:22px}
+.metric{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:14px 16px}
+.metric b{display:block;font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:6px}
+.metric strong{font-family:var(--serif);font-size:1.8rem;font-weight:400;display:block;line-height:1;font-variant-numeric:tabular-nums}
+.metric em{font-style:normal;font-size:.76rem;color:var(--muted);display:block;margin-top:6px}
+.accent strong{color:var(--copper-lit)}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);padding:9px 12px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--line);color:var(--text-2)}
+tr:last-child td{border-bottom:0}
+.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:.78rem}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.7rem;border:1px solid currentColor;white-space:nowrap}
+.p-good{color:var(--good)}.p-warn{color:var(--warn)}.p-bad{color:var(--bad)}
+.panelhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+.panelhead h4{font-family:var(--serif);font-weight:400;font-size:1.05rem;margin:0}
+.integrity{display:inline-flex;align-items:center;gap:7px;font-size:.8rem;color:var(--good)}
+.integrity::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--good)}
+
+/* code */
+pre{background:var(--bg-deep);border:1px solid var(--line);border-radius:6px;padding:18px;overflow-x:auto;font-family:var(--mono);font-size:.84rem;color:var(--text-2);line-height:1.65}
+pre .c{color:var(--muted)}
+pre .k{color:var(--copper-lit)}
+
+/* status table */
+.status td:first-child{color:var(--text)}
+.st{font-size:.72rem;letter-spacing:.05em;padding:2px 8px;border-radius:3px;border:1px solid currentColor}
+.st-c{color:var(--good)}.st-p{color:var(--warn)}.st-m{color:var(--muted)}
+
+footer{padding:56px 0 72px;border-top:1px solid var(--line);text-align:center;color:var(--muted);font-size:.86rem}
+footer a{color:var(--text-2)}
+@media (max-width:820px){.app__nav{display:none}section{padding:64px 0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <svg class="mark" width="92" height="92" viewBox="0 0 100 100" fill="none" aria-hidden="true">
+      <circle cx="50" cy="50" r="30" stroke="#F3EEE5" stroke-width="1.1" opacity=".85"/>
+      <circle cx="50" cy="50" r="21" stroke="#F3EEE5" stroke-width=".7" stroke-dasharray="2 3" opacity=".4"/>
+      <path d="M50 6V94M6 50H94" stroke="#F3EEE5" stroke-width=".6" opacity=".45"/>
+      <path d="M50 12 L55 46 L50 50 L45 46 Z" fill="#A66345"/>
+      <path d="M50 88 L45 54 L50 50 L55 54 Z" fill="#F3EEE5" opacity=".9"/>
+      <path d="M12 50 L46 45 L50 50 L46 55 Z" fill="#F3EEE5" opacity=".9"/>
+      <path d="M88 50 L54 55 L50 50 L54 45 Z" fill="#F3EEE5" opacity=".9"/>
+      <circle cx="80" cy="50" r="1.9" fill="#4867A9"/>
+    </svg>
+    <h1 class="wordmark">ATLAS</h1>
+    <div class="sub">Property Operations</div>
+    <div class="rule"></div>
+    <p class="tagline">Property intelligence, made operational.</p>
+    <p>
+      Leasing, accounting, maintenance, owners, vendors, documents, and assets in one
+      governed operating system — every workflow connected to the same property record,
+      the same financial record, and the same asset history.
+    </p>
+    <div class="cta">
+      <a class="btn btn--primary" href="https://github.com/ibuilder/atlas">View on GitHub</a>
+      <a class="btn" href="#demo">See the console</a>
+      <a class="btn" href="#quickstart">Run it locally</a>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">The gap</div>
+    <h2>The category is crowded. The model is still fragmented.</h2>
+    <p class="lede">
+      Property teams already have leasing, accounting, and maintenance software. What they
+      rarely have is one record those workflows agree on. The seams show up as spreadsheets,
+      re-keyed data, and an audit trail that stops at the module boundary.
+    </p>
+    <div class="grid g2" style="margin-top:34px">
+      <div class="card">
+        <h3>Typical platform reality</h3>
+        <p style="margin-bottom:10px">Leasing and maintenance exist, but records do not behave like one operational chain.</p>
+        <p style="margin-bottom:10px">Accounting is powerful, but physical asset context is thin.</p>
+        <p style="margin-bottom:10px">Documents exist, but not as a connected evidence graph.</p>
+        <p>AI appears as assistance, not as governed action infrastructure.</p>
+      </div>
+      <div class="card">
+        <h3>The Atlas position</h3>
+        <p style="margin-bottom:10px">One canonical property operations model.</p>
+        <p style="margin-bottom:10px">Operational and financial events tied to the same property graph.</p>
+        <p style="margin-bottom:10px">Assets, vendors, documents, and approvals connected by design.</p>
+        <p>AI introduced only with policy, auditability, and human control.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">The promise</div>
+    <h2>One operating model for every property event.</h2>
+    <div class="grid g3" style="margin-top:34px">
+      <div class="card">
+        <h3>Orient</h3>
+        <p>Portfolio, property, unit, lease, owner, vendor, and resident tied to one governed record.</p>
+      </div>
+      <div class="card">
+        <h3>Coordinate</h3>
+        <p>Work orders, approvals, invoices, notices, and reports connected to real operational context.</p>
+      </div>
+      <div class="card">
+        <h3>Account</h3>
+        <p>Every financial and operational action reviewable, permissioned, and auditable.</p>
+      </div>
+    </div>
+    <div class="chain">
+      <span>Property &amp; unit</span><i>→</i>
+      <span>Lease &amp; resident</span><i>→</i>
+      <span>Work order &amp; vendor</span><i>→</i>
+      <span>Invoice &amp; ledger</span><i>→</i>
+      <span>Document &amp; audit trail</span>
+    </div>
+    <p class="small muted" style="text-align:center;margin-top:18px">
+      From resident request to owner report, the chain stays intact.
+    </p>
+  </div>
+</section>
+
+<section id="demo">
+  <div class="wrap">
+    <div class="eyebrow">The console</div>
+    <h2>Built from the seeded demo portfolio.</h2>
+    <p class="lede" style="margin-bottom:30px">
+      Every figure below comes from <code class="mono">flask seed demo</code> — three properties,
+      26 units, 19 active leases, three months of invoices and payments, and maintenance
+      running through to completed work orders.
+    </p>
+
+    <div class="app">
+      <div class="app__bar">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        <span class="app__title">atlas · northlight property group · dashboard</span>
+      </div>
+      <div class="app__body">
+        <nav class="app__nav">
+          <div class="navlabel">Operations</div>
+          <div class="navitem on">Dashboard</div>
+          <div class="navitem">Properties</div>
+          <div class="navitem">Work orders</div>
+          <div class="navlabel" style="margin-top:16px">Governance</div>
+          <div class="navitem">Ledger</div>
+          <div class="navitem">Audit trail</div>
+        </nav>
+        <div class="app__main">
+          <div class="metrics">
+            <div class="metric"><b>Occupancy</b><strong>73.1%</strong><em>19 of 26 units</em></div>
+            <div class="metric accent"><b>Open receivable</b><strong>$12,900</strong><em>$12,900 overdue</em></div>
+            <div class="metric"><b>Delinquency</b><strong>4.2%</strong><em>of open balance</em></div>
+            <div class="metric"><b>SLA compliance</b><strong>100%</strong><em>0 breached of 4 open</em></div>
+          </div>
+          <div class="panelhead">
+            <h4>Work queue</h4><span class="tiny muted">Soonest deadline first</span>
+          </div>
+          <table>
+            <thead><tr><th>Order</th><th>Title</th><th>Trade</th><th>Priority</th><th>Status</th><th>Due</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">WO-000004</td><td>Heating not reaching the bedroom</td><td>hvac</td><td><span class="pill p-warn">High</span></td><td><span class="pill p-warn">In progress</span></td><td class="muted">in 62h</td></tr>
+              <tr><td class="mono">WO-000005</td><td>Front door lock sticking</td><td>general</td><td><span class="pill p-warn">High</span></td><td><span class="pill p-warn">Assigned</span></td><td class="muted">in 68h</td></tr>
+              <tr><td class="mono">WO-000002</td><td>Kitchen tap dripping</td><td>plumbing</td><td><span class="pill p-good">Low</span></td><td><span class="pill p-warn">In progress</span></td><td class="muted">in 29d</td></tr>
+              <tr><td class="mono">WO-000001</td><td>No hot water in the bathroom</td><td>plumbing</td><td><span class="pill p-bad">Emergency</span></td><td><span class="pill p-good">Completed</span></td><td class="muted">resolved</td></tr>
+            </tbody>
+          </table>
+          <p class="tiny muted" style="margin-top:14px">
+            “No hot water” was submitted as normal priority. Atlas reclassified it as a
+            habitability emergency on intake — statutory response clocks are not a
+            triage opinion.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g2" style="margin-top:26px">
+      <div class="app">
+        <div class="app__bar"><span class="dot"></span><span class="app__title">trial balance</span></div>
+        <div class="app__main">
+          <div class="panelhead"><h4>Posted account totals</h4><span class="integrity">In balance</span></div>
+          <table>
+            <thead><tr><th>Code</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">1000</td><td>Cash — Operating</td><td class="num">$157,850.00</td><td class="num">—</td></tr>
+              <tr><td class="mono">1100</td><td>Accounts Receivable</td><td class="num">$169,450.00</td><td class="num">$157,850.00</td></tr>
+              <tr><td class="mono">4000</td><td>Rental Income</td><td class="num">—</td><td class="num">$169,450.00</td></tr>
+              <tr><td><strong>Totals</strong></td><td></td><td class="num"><strong>$338,750.00</strong></td><td class="num"><strong>$338,750.00</strong></td></tr>
+            </tbody>
+          </table>
+          <p class="tiny muted" style="margin-top:12px">
+            The invariant is enforced three times: in the service, by a flush-time
+            recomputation from the lines, and by a database <code>CHECK</code>.
+          </p>
+        </div>
+      </div>
+
+      <div class="app">
+        <div class="app__bar"><span class="dot"></span><span class="app__title">audit trail</span></div>
+        <div class="app__main">
+          <div class="panelhead"><h4>Recent activity</h4><span class="integrity">Chain intact · 311 events verified</span></div>
+          <table>
+            <thead><tr><th class="num">Seq</th><th>Action</th><th>Resource</th><th>Hash</th></tr></thead>
+            <tbody>
+              <tr><td class="num mono">311</td><td class="mono">maintenance.work_order_completed</td><td>WO-000001</td><td class="mono muted">a3f7c1e0…</td></tr>
+              <tr><td class="num mono">310</td><td class="mono">ledger.journal_posted</td><td>JE-000110</td><td class="mono muted">7b21d94f…</td></tr>
+              <tr><td class="num mono">309</td><td class="mono">ar.payment_applied</td><td>PMT-000053</td><td class="mono muted">c08e5a2b…</td></tr>
+              <tr><td class="num mono">308</td><td class="mono">ar.invoice_issued</td><td>INV-000057</td><td class="mono muted">1d6fb730…</td></tr>
+            </tbody>
+          </table>
+          <p class="tiny muted" style="margin-top:12px">
+            Each event hashes its predecessor. Altering or removing any row breaks every
+            hash after it, and verification reports the exact sequence where it starts.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">Engineering</div>
+    <h2>The parts that are hard to retrofit.</h2>
+    <div class="grid g2" style="margin-top:30px">
+      <div class="card">
+        <h3>Tenant isolation, three deep</h3>
+        <p>Service scoping, an ORM guard that refuses unscoped tenant queries, and PostgreSQL
+        row-level security. Plus a build-failing invariant: a table carrying <code>org_id</code>
+        without being enrolled fails CI — the mistake that is invisible in review.</p>
+      </div>
+      <div class="card">
+        <h3>Audit you can prove</h3>
+        <p>Append-only events chained by SHA-256 per organization. Tampering is not prevented —
+        it is made undeniable, which is the property compliance actually asks for.</p>
+      </div>
+      <div class="card">
+        <h3>Deny by default</h3>
+        <p>One policy engine combining role scopes with ownership predicates. An unknown action
+        fails closed. Money movement demands a <em>fresh</em> MFA assertion. The test suite walks
+        the whole role × action × resource matrix.</p>
+      </div>
+      <div class="card">
+        <h3>Money that stays exact</h3>
+        <p><code>Decimal</code> end to end, <code>NUMERIC</code> on PostgreSQL and scaled integers
+        on SQLite — because a float ledger makes <code>0.10 + 0.20</code> equal
+        <code>0.30000000000000004</code>, and a test that lets that pass is worse than no test.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="quickstart">
+  <div class="wrap">
+    <div class="eyebrow">Run it</div>
+    <h2>Two commands to a seeded portfolio.</h2>
+    <pre><span class="c"># clone, install, and seed a complete demo organization</span>
+git clone https://github.com/ibuilder/atlas.git &amp;&amp; cd atlas
+<span class="k">make</span> setup
+<span class="k">make</span> demo
+
+<span class="c"># or bring up Postgres, Redis, web, worker, and beat</span>
+docker compose up --build</pre>
+    <p class="small muted" style="margin-top:18px">
+      <code>make demo</code> prints a sign-in for every role — administrator, controller,
+      accountant, property manager, leasing agent, dispatcher, auditor, resident, owner,
+      and vendor — so every surface is walkable from one seed.
+    </p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">Status</div>
+    <h2>What is built, and what is not.</h2>
+    <p class="lede" style="margin-bottom:26px">
+      Version 0.1.0 is an enterprise core, not a finished platform. The full matrix is in
+      <a href="https://github.com/ibuilder/atlas/blob/main/docs/FEATURES.md">FEATURES.md</a>;
+      a roadmap that reads as a feature list is how a buyer discovers the gap during
+      implementation.
+    </p>
+    <table class="status">
+      <thead><tr><th>Area</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Tenancy, audit, authorization</td><td><span class="st st-c">Complete</span></td><td class="muted">RLS migration still to land</td></tr>
+        <tr><td>Identity, MFA, sessions, API tokens</td><td><span class="st st-c">Complete</span></td><td class="muted">SSO is a defined seam</td></tr>
+        <tr><td>Double-entry ledger, AR, period close</td><td><span class="st st-c">Complete</span></td><td class="muted">AP and reconciliation are modelled</td></tr>
+        <tr><td>Maintenance intake, work orders, SLA</td><td><span class="st st-c">Complete</span></td><td class="muted">Inspections and PM are modelled</td></tr>
+        <tr><td>REST API, OpenAPI, admin console, portals</td><td><span class="st st-p">Partial</span></td><td class="muted">Read surfaces complete; some writes API-only</td></tr>
+        <tr><td>Documents, assets, automation, webhooks</td><td><span class="st st-m">Modelled</span></td><td class="muted">Schema and invariants; services pending</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>
+      <a href="https://github.com/ibuilder/atlas">Repository</a> ·
+      <a href="https://github.com/ibuilder/atlas/blob/main/docs/ARCHITECTURE.md">Architecture</a> ·
+      <a href="https://github.com/ibuilder/atlas/blob/main/docs/adr/README.md">Decision records</a> ·
+      <a href="https://github.com/ibuilder/atlas/blob/main/docs/runbooks/README.md">Runbooks</a> ·
+      <a href="https://github.com/ibuilder/atlas/blob/main/SECURITY.md">Security</a>
+    </p>
+    <p class="tiny">Atlas PMOS · MIT licensed · Property intelligence, made operational.</p>
+  </div>
+</footer>
+
+</body>
+</html>

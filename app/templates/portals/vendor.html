@@ -1,0 +1,64 @@
+{# SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}Vendor portal · {{ app_name }}{% endblock %}
+{% block heading %}Assigned work{% endblock %}
+
+{% block nav %}
+<div class="sidebar__group">
+  <div class="sidebar__label">Vendor</div>
+  <a class="sidebar__link" href="{{ url_for('vendor.dashboard') }}" aria-current="page">Work orders</a>
+</div>
+{% endblock %}
+
+{% block topbar_meta %}
+{% if vendor %}
+  <span class="small muted">{{ vendor.name }}</span>
+  {{ vendor.compliance_status | status_pill }}
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if vendor and not vendor.is_dispatchable %}
+  <div class="flash flash--warning" role="status">
+    New work cannot be assigned to you until your compliance documents are current
+    ({{ vendor.compliance_status | humanize }}).
+  </div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Open assignments</h2>
+    <span class="panel__hint">{{ work_orders | length }} active</span>
+  </div>
+
+  {% if work_orders %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Order</th><th>Title</th><th>Priority</th><th>Status</th><th>Due</th><th>Scheduled</th></tr>
+        </thead>
+        <tbody>
+          {% for order in work_orders %}
+            <tr>
+              <td class="mono tiny">{{ order.work_order_number }}</td>
+              <td class="truncate">{{ order.title }}</td>
+              <td>{{ order.priority | status_pill }}</td>
+              <td>{{ order.status | status_pill }}</td>
+              <td class="tiny nowrap">
+                {% if order.is_sla_breached %}
+                  <span class="pill pill--bad">Overdue</span>
+                {% else %}
+                  <span class="dim">{{ order.resolution_due_at | since }}</span>
+                {% endif %}
+              </td>
+              <td class="tiny dim nowrap">{{ order.scheduled_start | datetime }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No work is currently assigned to you.</p>
+  {% endif %}
+</div>
+{% endblock %}

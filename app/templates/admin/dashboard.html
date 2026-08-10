@@ -1,0 +1,113 @@
+{# SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav %}
+{% block title %}Dashboard · {{ app_name }}{% endblock %}
+{% block heading %}Dashboard{% endblock %}
+{% block nav %}{{ admin_nav('dashboard') }}{% endblock %}
+{% block topbar_meta %}<span class="tiny dim">{{ app_tagline }}</span>{% endblock %}
+
+{% block content %}
+<div class="grid grid--4">
+  <div class="metric">
+    <div class="metric__label">Occupancy</div>
+    <div class="metric__value">{{ metrics.occupancy | pct }}</div>
+    <div class="metric__sub">{{ metrics.occupied }} of {{ metrics.units }} units</div>
+  </div>
+  <div class="metric metric--accent">
+    <div class="metric__label">Open receivable</div>
+    <div class="metric__value">{{ metrics.open_balance | money }}</div>
+    <div class="metric__sub">{{ metrics.overdue_balance | money }} overdue</div>
+  </div>
+  <div class="metric {% if metrics.delinquency > 5 %}metric--alert{% endif %}">
+    <div class="metric__label">Delinquency</div>
+    <div class="metric__value">{{ metrics.delinquency | pct }}</div>
+    <div class="metric__sub">of open balance past due</div>
+  </div>
+  <div class="metric {% if metrics.breached %}metric--alert{% endif %}">
+    <div class="metric__label">SLA compliance</div>
+    <div class="metric__value">{{ metrics.sla_compliance | pct }}</div>
+    <div class="metric__sub">{{ metrics.breached }} breached of {{ metrics.open_work_orders }} open</div>
+  </div>
+</div>
+
+<div class="grid grid--4 mt-4">
+  <div class="metric">
+    <div class="metric__label">Properties</div>
+    <div class="metric__value">{{ metrics.properties }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">Active leases</div>
+    <div class="metric__value">{{ metrics.active_leases }}</div>
+    <div class="metric__sub">{{ metrics.expiring }} expiring within 90 days</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">Open work orders</div>
+    <div class="metric__value">{{ metrics.open_work_orders }}</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">Units</div>
+    <div class="metric__value">{{ metrics.units }}</div>
+  </div>
+</div>
+
+<div class="grid grid--2 mt-6">
+  <section class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Maintenance intake</h2>
+      <span class="panel__hint">Most recent</span>
+    </div>
+    {% if recent_requests %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr><th>Request</th><th>Summary</th><th>Priority</th><th>Status</th><th>Raised</th></tr>
+          </thead>
+          <tbody>
+            {% for request in recent_requests %}
+              <tr>
+                <td class="mono tiny">{{ request.request_number }}</td>
+                <td class="truncate">{{ request.title }}</td>
+                <td>{{ request.priority | status_pill }}</td>
+                <td>{{ request.status | status_pill }}</td>
+                <td class="dim tiny nowrap">{{ request.created_at | since }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">No maintenance requests yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Work queue</h2>
+      <span class="panel__hint">Soonest deadline first</span>
+    </div>
+    {% if urgent_work %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr><th>Order</th><th>Title</th><th>Status</th><th>Due</th></tr>
+          </thead>
+          <tbody>
+            {% for order in urgent_work %}
+              <tr>
+                <td class="mono tiny">{{ order.work_order_number }}</td>
+                <td class="truncate">{{ order.title }}</td>
+                <td>{{ order.status | status_pill }}</td>
+                <td class="tiny nowrap {% if order.is_sla_breached %}pill--bad{% else %}dim{% endif %}">
+                  {{ order.resolution_due_at | since }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">Nothing in the queue.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

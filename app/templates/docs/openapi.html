@@ -1,0 +1,76 @@
+{# API reference, rendered from the generated OpenAPI document.
+   Server-rendered rather than a CDN-loaded viewer: the CSP forbids external
+   scripts, and a docs page is not worth relaxing it for.
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/brand.html" import wordmark %}
+{% block title %}API reference · {{ app_name }}{% endblock %}
+{% block heading %}API reference{% endblock %}
+
+{% block nav %}
+<div class="sidebar__group">
+  <div class="sidebar__label">Reference</div>
+  {% for name, description in tag_order %}
+    {% if grouped.get(name) %}
+      <a class="sidebar__link" href="#{{ name | lower }}">{{ name }}</a>
+    {% endif %}
+  {% endfor %}
+  <a class="sidebar__link" href="{{ url_for('openapi.spec') }}">openapi.json</a>
+</div>
+{% endblock %}
+
+{% block topbar_meta %}
+<span class="tiny dim">OpenAPI {{ document.openapi }} · v{{ document.info.version }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <h2 class="panel__title">{{ document.info.title }}</h2>
+  <p class="lede">{{ document.info.summary }}</p>
+  <p class="small muted">{{ document.info.description }}</p>
+  <hr class="rule">
+  <div class="grid grid--2">
+    <div>
+      <div class="metric__label">Authentication</div>
+      <p class="small muted">
+        Send <code>Authorization: Bearer atlas_api_…</code>, or use a browser
+        session cookie plus an <code>X-CSRFToken</code> header on unsafe methods.
+      </p>
+    </div>
+    <div>
+      <div class="metric__label">Conventions</div>
+      <p class="small muted">
+        Collections are cursor-paginated via <code>page_info.next_cursor</code>.
+        Unsafe requests accept <code>Idempotency-Key</code>. Errors share one
+        envelope with a stable <code>code</code>.
+      </p>
+    </div>
+  </div>
+</div>
+
+{% for name, description in tag_order %}
+  {% set operations = grouped.get(name) %}
+  {% if operations %}
+    <section class="panel mt-6" id="{{ name | lower }}">
+      <div class="panel__head">
+        <h2 class="panel__title">{{ name }}</h2>
+        <span class="panel__hint">{{ description }}</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+          <tbody>
+            {% for operation in operations %}
+              <tr>
+                <td class="mono tiny nowrap">{{ operation.method }}</td>
+                <td class="mono tiny nowrap">{{ operation.path }}</td>
+                <td class="small muted">{{ operation.summary or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+{% endfor %}
+{% endblock %}

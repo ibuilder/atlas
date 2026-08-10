@@ -1,0 +1,49 @@
+{# SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav %}
+{% block title %}Properties · {{ app_name }}{% endblock %}
+{% block heading %}Properties{% endblock %}
+{% block nav %}{{ admin_nav('properties') }}{% endblock %}
+
+{% block topbar_meta %}
+<form method="get" class="row">
+  <input type="search" name="q" value="{{ search }}" placeholder="Search name or code" aria-label="Search properties">
+  <button class="btn btn--sm" type="submit">Search</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Portfolio</h2>
+    <span class="panel__hint">{{ properties | length }} shown</span>
+  </div>
+
+  {% if properties %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Code</th><th>Name</th><th>Type</th><th>Address</th>
+            <th class="num">Units</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for property in properties %}
+            <tr>
+              <td class="mono tiny">{{ property.code }}</td>
+              <td>{{ property.name }}</td>
+              <td class="tiny muted">{{ property.property_type | humanize }}</td>
+              <td class="truncate muted small">{{ property.display_address }}</td>
+              <td class="num">{{ property.total_units }}</td>
+              <td>{{ property.status | status_pill }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No properties match.</p>
+  {% endif %}
+</div>
+{% endblock %}

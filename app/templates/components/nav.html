@@ -1,0 +1,37 @@
+{# Primary navigation. Items are hidden when the viewer lacks the permission -
+   courtesy, not enforcement; the policy engine still guards every view.
+   SPDX-License-Identifier: MIT #}
+{% macro admin_nav(active) -%}
+<div class="sidebar__group">
+  <div class="sidebar__label">Operations</div>
+  <a class="sidebar__link" href="{{ url_for('admin.dashboard') }}"
+     {% if active == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+  {% if can('property.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.properties') }}"
+       {% if active == 'properties' %}aria-current="page"{% endif %}>Properties</a>
+  {% endif %}
+  {% if can('work_order.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.work_orders') }}"
+       {% if active == 'work_orders' %}aria-current="page"{% endif %}>Work orders</a>
+  {% endif %}
+</div>
+
+{% if can('ledger.read') or can('audit.read') %}
+<div class="sidebar__group">
+  <div class="sidebar__label">Governance</div>
+  {% if can('ledger.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.ledger') }}"
+       {% if active == 'ledger' %}aria-current="page"{% endif %}>Ledger</a>
+  {% endif %}
+  {% if can('audit.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.audit') }}"
+       {% if active == 'audit' %}aria-current="page"{% endif %}>Audit trail</a>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="sidebar__group">
+  <div class="sidebar__label">Developer</div>
+  <a class="sidebar__link" href="{{ url_for('openapi.docs') }}">API reference</a>
+</div>
+{%- endmacro %}

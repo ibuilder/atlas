@@ -1,0 +1,64 @@
+{# Application shell.
+   SPDX-License-Identifier: MIT #}
+{% from "components/brand.html" import wordmark, mark %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <meta name="description" content="{{ app_tagline }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/atlas.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='brand/favicon.svg') }}" type="image/svg+xml">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+{% block body %}
+<div class="shell">
+  <nav class="sidebar" aria-label="Primary">
+    <div class="sidebar__brand">
+      <a href="{{ url_for('public.index') }}" aria-label="{{ app_name }} home">{{ wordmark(32) }}</a>
+    </div>
+
+    {% block nav %}{% endblock %}
+
+    <div class="sidebar__foot">
+      {% if current_user.is_authenticated %}
+        <div class="small muted truncate" title="{{ current_user.email }}">{{ current_user.full_name }}</div>
+        <div class="tiny dim">{{ current_user.user_type | humanize }}</div>
+        <form method="post" action="{{ url_for('auth.logout') }}" class="stack">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn--sm btn--block" type="submit">Sign out</button>
+        </form>
+      {% else %}
+        <a class="btn btn--sm btn--block" href="{{ url_for('auth.login_form') }}">Sign in</a>
+      {% endif %}
+      {% if environment != 'production' %}
+        <div class="tiny dim mt-2">{{ environment }}</div>
+      {% endif %}
+    </div>
+  </nav>
+
+  <div class="main">
+    <header class="topbar">
+      <h1 class="topbar__title">{% block heading %}{% endblock %}</h1>
+      <div class="topbar__meta">{% block topbar_meta %}{% endblock %}</div>
+    </header>
+
+    <main class="content" id="main">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash flash--{{ category }}" role="status">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+</div>
+{% endblock %}
+</body>
+</html>

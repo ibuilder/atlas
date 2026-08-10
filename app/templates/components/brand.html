@@ -1,0 +1,29 @@
+{# The Atlas compass mark, drawn inline so it scales, inherits colour, and
+   needs no network request under the strict CSP.
+   SPDX-License-Identifier: MIT #}
+{% macro mark(size=34) -%}
+<svg class="wordmark__mark" width="{{ size }}" height="{{ size }}" viewBox="0 0 100 100"
+     fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  <circle cx="50" cy="50" r="30" stroke="var(--cream)" stroke-width="1.1" opacity="0.85"/>
+  <circle cx="50" cy="50" r="21" stroke="var(--cream)" stroke-width="0.7"
+          stroke-dasharray="2 3" opacity="0.4"/>
+  <path d="M50 6 V94" stroke="var(--cream)" stroke-width="0.6" opacity="0.45"/>
+  <path d="M6 50 H94" stroke="var(--cream)" stroke-width="0.6" opacity="0.45"/>
+  {# Four-point star: the north arm is copper, the rest ivory. #}
+  <path d="M50 12 L55 46 L50 50 L45 46 Z" fill="var(--copper)"/>
+  <path d="M50 88 L45 54 L50 50 L55 54 Z" fill="var(--cream)" opacity="0.9"/>
+  <path d="M12 50 L46 45 L50 50 L46 55 Z" fill="var(--cream)" opacity="0.9"/>
+  <path d="M88 50 L54 55 L50 50 L54 45 Z" fill="var(--cream)" opacity="0.9"/>
+  <circle cx="80" cy="50" r="1.8" fill="var(--blue)"/>
+</svg>
+{%- endmacro %}
+
+{% macro wordmark(size=34, sub=true) -%}
+<span class="wordmark">
+  {{ mark(size) }}
+  <span class="wordmark__text">
+    <span class="wordmark__name">Atlas</span>
+    {% if sub %}<span class="wordmark__sub">Property Operations</span>{% endif %}
+  </span>
+</span>
+{%- endmacro %}

@@ -1,0 +1,22 @@
+{# Single-card layout for sign-in, errors, and other standalone pages.
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/brand.html" import wordmark %}
+
+{% block body %}
+<div class="centred">
+  {{ wordmark(46) }}
+  <p class="tagline">{{ app_tagline }}</p>
+  <div class="card">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash flash--{{ category }}" role="status">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    {% block card %}{% endblock %}
+  </div>
+  <p class="tiny dim">&copy; {{ current_year }} {{ app_name }}</p>
+</div>
+{% endblock %}

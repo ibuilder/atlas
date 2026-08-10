@@ -1,0 +1,89 @@
+{# SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}My home · {{ app_name }}{% endblock %}
+{% block heading %}My home{% endblock %}
+
+{% block nav %}
+<div class="sidebar__group">
+  <div class="sidebar__label">Resident</div>
+  <a class="sidebar__link" href="{{ url_for('resident.dashboard') }}" aria-current="page">Overview</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid--4">
+  <div class="metric {% if balance > 0 %}metric--accent{% endif %}">
+    <div class="metric__label">Balance due</div>
+    <div class="metric__value">{{ balance | money }}</div>
+    <div class="metric__sub">
+      {% if invoices %}Next due {{ invoices[0].due_date | date }}{% else %}Nothing outstanding{% endif %}
+    </div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">Monthly rent</div>
+    <div class="metric__value">{{ lease.rent_amount | money if lease else '—' }}</div>
+    <div class="metric__sub">{% if lease %}Due on day {{ lease.billing_day }}{% endif %}</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">Lease ends</div>
+    <div class="metric__value tabular">{{ lease.end_date | date('%d %b') if lease else '—' }}</div>
+    <div class="metric__sub">{% if lease %}{{ lease.end_date | date('%Y') }}{% endif %}</div>
+  </div>
+  <div class="metric">
+    <div class="metric__label">Open requests</div>
+    <div class="metric__value">{{ requests | selectattr('status', 'in', ['new', 'triaged', 'in_progress']) | list | length }}</div>
+  </div>
+</div>
+
+<div class="grid grid--2 mt-6">
+  <section class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Amounts due</h2>
+    </div>
+    {% if invoices %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Invoice</th><th>Due</th><th>Status</th><th class="num">Balance</th></tr></thead>
+          <tbody>
+            {% for invoice in invoices %}
+              <tr>
+                <td class="mono tiny">{{ invoice.invoice_number }}</td>
+                <td class="tiny nowrap">{{ invoice.due_date | date }}</td>
+                <td>{{ invoice.status | status_pill }}</td>
+                <td class="num">{{ invoice.balance | money }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">You are all paid up.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Maintenance</h2>
+    </div>
+    {% if requests %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Request</th><th>Summary</th><th>Status</th><th>Raised</th></tr></thead>
+          <tbody>
+            {% for request in requests %}
+              <tr>
+                <td class="mono tiny">{{ request.request_number }}</td>
+                <td class="truncate">{{ request.title }}</td>
+                <td>{{ request.status | status_pill }}</td>
+                <td class="tiny dim nowrap">{{ request.created_at | since }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">No maintenance requests.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

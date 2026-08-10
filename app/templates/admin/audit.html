@@ -1,0 +1,64 @@
+{# The audit trail, with a live integrity verdict from re-walking the hash chain.
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav %}
+{% block title %}Audit trail · {{ app_name }}{% endblock %}
+{% block heading %}Audit trail{% endblock %}
+{% block nav %}{{ admin_nav('audit') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if integrity %}
+  {% if integrity.intact %}
+    <span class="integrity">
+      <span class="integrity__dot"></span>
+      Chain intact · {{ integrity.events_checked }} events verified
+    </span>
+  {% else %}
+    <span class="integrity integrity--broken">
+      <span class="integrity__dot"></span>
+      Chain broken at sequence {{ integrity.at_sequence }} ({{ integrity.failure | humanize }})
+    </span>
+  {% endif %}
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Recent activity</h2>
+    <span class="panel__hint">Append-only, hash-chained per organization</span>
+  </div>
+
+  {% if events %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th class="num">Seq</th><th>When</th><th>Action</th>
+            <th>Resource</th><th>Actor</th><th>Outcome</th><th>Hash</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for event in events %}
+            <tr>
+              <td class="num mono tiny">{{ event.sequence }}</td>
+              <td class="tiny nowrap dim">{{ event.occurred_at | datetime }}</td>
+              <td class="mono tiny">{{ event.action }}</td>
+              <td class="truncate small">
+                {{ event.resource_label or event.resource_type or '—' }}
+              </td>
+              <td class="small muted truncate">{{ event.actor_label or event.actor_type }}</td>
+              <td>{{ event.outcome | status_pill }}</td>
+              <td class="mono tiny dim" title="{{ event.entry_hash }}">
+                {{ event.entry_hash[:10] }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No audit events recorded yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

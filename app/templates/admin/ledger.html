@@ -1,0 +1,66 @@
+{# Trial balance. The totals row is the point: if debits and credits ever
+   disagree, something bypassed the posting service.
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav %}
+{% block title %}Ledger · {{ app_name }}{% endblock %}
+{% block heading %}Trial balance{% endblock %}
+{% block nav %}{{ admin_nav('ledger') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if total_debit == total_credit %}
+  <span class="integrity"><span class="integrity__dot"></span> In balance</span>
+{% else %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span> Out of balance</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Posted account totals</h2>
+    <span class="panel__hint">{{ rows | length }} accounts with activity</span>
+  </div>
+
+  {% if rows %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Code</th><th>Account</th><th>Type</th>
+            <th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td class="mono tiny">{{ row.code }}</td>
+              <td>{{ row.name }}</td>
+              <td class="tiny muted">{{ row.account_type | humanize }}</td>
+              <td class="num">{{ row.debit | money }}</td>
+              <td class="num">{{ row.credit | money }}</td>
+              <td class="num">{{ row.balance | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="3"><strong>Totals</strong></td>
+            <td class="num"><strong>{{ total_debit | money }}</strong></td>
+            <td class="num"><strong>{{ total_credit | money }}</strong></td>
+            <td class="num">
+              {% if total_debit == total_credit %}
+                <span class="pill pill--good">Balanced</span>
+              {% else %}
+                <span class="pill pill--critical">Off by {{ (total_debit - total_credit) | money }}</span>
+              {% endif %}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No posted entries yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

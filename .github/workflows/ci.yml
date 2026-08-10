@@ -1,0 +1,205 @@
+# Continuous integration.
+#
+# The suite runs twice: once on SQLite (fast, and proves the portable path
+# stays portable) and once on PostgreSQL (the production dialect, and the only
+# place the row-level-security tests mean anything).
+#
+# SPDX-License-Identifier: MIT
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  quality:
+    name: Lint, types, and security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Format check
+        run: black --check app tests wsgi.py
+
+      - name: Lint
+        run: ruff check app tests --output-format github
+
+      - name: Type check
+        run: mypy app
+        continue-on-error: true
+
+      - name: Static security analysis
+        run: bandit -r app -q -c pyproject.toml
+
+      - name: Dependency audit
+        run: pip-audit --strict
+        continue-on-error: true
+
+  test:
+    name: Tests (Python ${{ matrix.python }}, ${{ matrix.database }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        database: [sqlite]
+        include:
+          # The production dialect, exercised once rather than on every version.
+          - python: "3.12"
+            database: postgres
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: atlas
+          POSTGRES_DB: atlas_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U atlas"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Verify schema invariants
+        run: python -c "from app.models.registry import validate_schema; validate_schema(); print('schema invariants OK')"
+
+      - name: Run tests
+        env:
+          ATLAS_ENV: testing
+          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://atlas:atlas@localhost:5432/atlas_test' || '' }}
+        run: pytest --cov=app --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        if: matrix.python == '3.12' && matrix.database == 'sqlite'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  migrations:
+    name: Migrations apply and reverse
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: atlas
+          POSTGRES_PASSWORD: atlas
+          POSTGRES_DB: atlas_migrations
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U atlas"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+
+      - name: Upgrade to head
+        env:
+          ATLAS_ENV: development
+          DATABASE_URL: postgresql+psycopg://atlas:atlas@localhost:5432/atlas_migrations
+        run: alembic upgrade head
+
+      - name: Check for undeclared model changes
+        env:
+          ATLAS_ENV: development
+          DATABASE_URL: postgresql+psycopg://atlas:atlas@localhost:5432/atlas_migrations
+        # A model edited without a migration is a deploy that fails at runtime.
+        run: alembic check
+
+      - name: Downgrade to base
+        env:
+          ATLAS_ENV: development
+          DATABASE_URL: postgresql+psycopg://atlas:atlas@localhost:5432/atlas_migrations
+        run: alembic downgrade base
+
+  container:
+    name: Container build and SBOM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/Dockerfile
+          push: false
+          load: true
+          tags: atlas-pmos:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the image does not run as root
+        run: |
+          user=$(docker run --rm --entrypoint sh atlas-pmos:ci -c 'id -u')
+          echo "container uid: $user"
+          test "$user" != "0"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: atlas-pmos:ci
+          format: spdx-json
+          artifact-name: atlas-sbom.spdx.json
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: atlas-pmos:ci
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: "0"

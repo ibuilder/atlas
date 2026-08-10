@@ -1,0 +1,33 @@
+{# SPDX-License-Identifier: MIT #}
+{% extends "layouts/centred.html" %}
+{% block title %}Sign in · {{ app_name }}{% endblock %}
+
+{% block card %}
+<h2>Sign in</h2>
+<p class="small muted">Use the account issued by your organization.</p>
+
+<form method="post" action="{{ url_for('auth.login') }}" class="stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next }}">
+
+  <div class="field">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="username"
+           required autofocus spellcheck="false">
+  </div>
+
+  <div class="field">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password"
+           autocomplete="current-password" required>
+  </div>
+
+  <button class="btn btn--primary btn--block" type="submit">Continue</button>
+</form>
+
+<hr class="rule">
+<p class="tiny dim">
+  Trouble signing in? Contact your administrator.
+  Accounts lock temporarily after repeated failed attempts.
+</p>
+{% endblock %}

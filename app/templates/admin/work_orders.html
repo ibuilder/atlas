@@ -1,0 +1,56 @@
+{# SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav %}
+{% block title %}Work orders · {{ app_name }}{% endblock %}
+{% block heading %}Work orders{% endblock %}
+{% block nav %}{{ admin_nav('work_orders') }}{% endblock %}
+
+{% block topbar_meta %}
+<div class="row">
+  <a class="btn btn--sm" href="{{ url_for('admin.work_orders') }}">All</a>
+  <a class="btn btn--sm" href="{{ url_for('admin.work_orders', status='open') }}">Open</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Queue</h2>
+    <span class="panel__hint">{{ work_orders | length }} shown</span>
+  </div>
+
+  {% if work_orders %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Order</th><th>Title</th><th>Trade</th><th>Priority</th>
+            <th>Status</th><th>Due</th><th class="num">Cost</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for order in work_orders %}
+            <tr>
+              <td class="mono tiny">{{ order.work_order_number }}</td>
+              <td class="truncate">{{ order.title }}</td>
+              <td class="tiny muted">{{ order.trade | humanize }}</td>
+              <td>{{ order.priority | status_pill }}</td>
+              <td>{{ order.status | status_pill }}</td>
+              <td class="tiny nowrap">
+                {% if order.is_sla_breached %}
+                  <span class="pill pill--bad">Breached</span>
+                {% else %}
+                  <span class="dim">{{ order.resolution_due_at | since }}</span>
+                {% endif %}
+              </td>
+              <td class="num">{{ order.total_cost | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No work orders match.</p>
+  {% endif %}
+</div>
+{% endblock %}

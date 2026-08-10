@@ -1,0 +1,15 @@
+{# Error page. Shows the correlation ID so a user can quote one string to
+   support and have the whole request found in the logs.
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/centred.html" %}
+{% block title %}{{ code }} · {{ app_name }}{% endblock %}
+
+{% block card %}
+<h2 class="display-xl">{{ code }}</h2>
+<p class="muted">{{ message }}</p>
+<hr class="rule">
+{% if correlation_id %}
+  <p class="tiny dim">Reference<br><span class="mono">{{ correlation_id }}</span></p>
+{% endif %}
+<a class="btn btn--block" href="{{ url_for('public.index') }}">Back to Atlas</a>
+{% endblock %}

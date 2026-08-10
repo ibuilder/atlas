@@ -1,0 +1,28 @@
+{# SPDX-License-Identifier: MIT #}
+{% extends "layouts/centred.html" %}
+{% block title %}Verify · {{ app_name }}{% endblock %}
+
+{% block card %}
+<h2>Verification</h2>
+<p class="small muted">Enter the six-digit code from your authenticator app.</p>
+
+<form method="post" action="{{ url_for('auth.mfa') }}" class="stack">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="next" value="{{ next }}">
+
+  <div class="field">
+    <label for="code">Code</label>
+    <input id="code" name="code" type="text" inputmode="numeric"
+           autocomplete="one-time-code" pattern="[0-9A-Za-z-]{6,11}"
+           required autofocus spellcheck="false" class="code-input">
+  </div>
+
+  <button class="btn btn--primary btn--block" type="submit">Verify</button>
+</form>
+
+<hr class="rule">
+<p class="tiny dim">
+  Lost your authenticator? Enter one of your recovery codes instead.
+  Each may be used once.
+</p>
+{% endblock %}
