@@ -12,6 +12,18 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Approvals workflow** (roadmap 3.2). One request-decide-act path for every
+  sensitive action. A requester can never grant their own request. Expiry is
+  checked when an approval is *used*, not only when it is granted - an approval
+  issued in March does not authorise a payment in September. The payload is
+  fingerprinted when the checkpoint is raised and re-checked at the moment of
+  action, so a record that moved afterwards no longer carries the decision.
+- Bill payment now enforces that property directly: the total is snapshotted at
+  approval, and a bill edited from $4,200 to $42,000 afterwards is refused with
+  a critical audit event rather than paid on the strength of the old decision.
+  Migration `c93f21a5d7e4` adds `bills.approved_total` and backfills it.
+- A scheduled sweep lapses approvals nobody decided.
+
 - **Automation rule engine** (roadmap 3.1). Conditions are data, not code: a
   JSON tree walked by a fixed operator table, with no `eval`, no attribute
   access, no regular expressions, and bounded depth - so there is no path from

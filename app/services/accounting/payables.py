@@ -31,7 +31,13 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.errors import BusinessRuleViolation, Conflict, NotFound, ValidationFailed
+from app.errors import (
+    ApprovalRequired,
+    BusinessRuleViolation,
+    Conflict,
+    NotFound,
+    ValidationFailed,
+)
 from app.logging import get_logger
 from app.models.accounting import (
     ZERO,
@@ -42,7 +48,7 @@ from app.models.accounting import (
     BillStatus,
     PaymentMethod,
 )
-from app.models.audit import AuditAction, AuditSeverity
+from app.models.audit import AuditAction, AuditOutcome, AuditSeverity
 from app.models.sequences import SequenceKey
 from app.models.types import quantize_money, utcnow
 from app.models.vendor import Vendor
@@ -283,6 +289,9 @@ def approve_bill(
     bill.status = BillStatus.APPROVED
     bill.approved_at = utcnow()
     bill.approved_by_id = approver_id
+    # Snapshot what was actually authorised. Approving "this bill" is not the
+    # same as approving whatever this bill later becomes.
+    bill.approved_total = bill.total
     session.flush()
 
     record_audit_event(
@@ -323,6 +332,27 @@ def pay_bill(
         raise BusinessRuleViolation("A void bill cannot be paid.")
     if bill.status in (BillStatus.DRAFT, BillStatus.PENDING_APPROVAL):
         raise BusinessRuleViolation(f"Bill {bill.bill_number} has not been approved for payment.")
+
+    # The approver authorised an amount, not a row. If the bill has moved since,
+    # their decision does not carry over to the new figure.
+    if bill.approved_total is not None and bill.approved_total != bill.total:
+        record_audit_event(
+            action=AuditAction.BILL_APPROVED,
+            resource_type="Bill",
+            resource_id=bill.id,
+            resource_label=bill.bill_number,
+            outcome=AuditOutcome.DENIED,
+            severity=AuditSeverity.CRITICAL,
+            payload={"approved_total": str(bill.approved_total), "current_total": str(bill.total)},
+            reason="The bill changed after it was approved.",
+            org_id=bill.org_id,
+            actor_id=actor_id,
+            session=session,
+        )
+        raise ApprovalRequired(
+            f"Bill {bill.bill_number} was approved at {bill.approved_total} but now totals "
+            f"{bill.total}. It must be approved again at the new amount."
+        )
 
     # Locked, so two concurrent disbursements cannot each see the full balance
     # and together overpay the vendor.

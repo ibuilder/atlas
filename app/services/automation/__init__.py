@@ -10,6 +10,16 @@ from app.services.automation.actions import (
     known_actions,
     validate_actions,
 )
+from app.services.automation.approvals import (
+    approval_by_id,
+    approve,
+    consume_approval,
+    expire_stale_approvals,
+    payload_fingerprint,
+    pending_approvals,
+    reject,
+    request_approval,
+)
 from app.services.automation.conditions import (
     ConditionResult,
     evaluate_conditions,
@@ -36,6 +46,14 @@ __all__ = [
     "ConditionResult",
     "RuleOutcome",
     "activate_rule",
+    "approval_by_id",
+    "approve",
+    "consume_approval",
+    "expire_stale_approvals",
+    "payload_fingerprint",
+    "pending_approvals",
+    "reject",
+    "request_approval",
     "create_rule",
     "dispatch_event",
     "evaluate_conditions",

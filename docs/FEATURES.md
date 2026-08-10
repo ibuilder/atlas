@@ -116,7 +116,7 @@ feature list is how a buyer discovers the gap during implementation.
 | Capability | Status | Notes |
 |---|---|---|
 | Rule engine | **Complete** | Conditions are a JSON tree walked by a fixed operator table - no `eval`, no attribute access, no regular expressions, bounded depth. Actions are registered handlers split into `describe` and `apply`, so a dry run *cannot* mutate: the writing half is never called. Rules start inactive and in dry run, and promotion requires a dry run on file that did not fail. Cascades are bounded by depth and by a chain that refuses a rule re-entry. Hourly throttle and auto-disable after consecutive failures. |
-| Approvals with separation of duties | **Partial** | `can_be_decided_by()` enforces requester ≠ approver, and automation raises approvals with no requester so nobody can self-approve an automated action; the general routing workflow is still to come. |
+| Approvals with separation of duties | **Complete** | One request-decide-act path for every sensitive action. A requester can never grant their own request. Expiry is checked when the approval is *used*, not only when granted, so one issued in March cannot authorise a payment in September. The payload is fingerprinted at request time and re-checked at use, so a record edited after approval loses it - a bill approved at $4,200 and edited to $42,000 must be approved again. |
 | Transactional outbox | **Complete** | Events written in the caller's transaction; a separate dispatcher publishes. Domain events are announced through one function that feeds both the outbox and the rule engine, so the two cannot drift. |
 | Signed webhooks with retry and DLQ | **Complete** | HMAC-SHA256 with the timestamp inside the signed string, exponential backoff to a 6h ceiling, dead-lettering, endpoint auto-disable, operator replay, and SSRF protection on customer-supplied URLs. |
 | Inbound webhook deduplication | **Complete** | Payment capture is idempotent by provider event id. |
@@ -134,5 +134,6 @@ feature list is how a buyer discovers the gap during implementation.
 | Recurring charge generation | **Complete** |
 | Delinquency sweep | **Complete** |
 | Owner statement generation | **Complete** |
+| Stale approval expiry | **Complete** |
 | Preventive maintenance generation | **Modelled** (scheduled, not implemented) |
 | Webhook dispatch | **Complete** |

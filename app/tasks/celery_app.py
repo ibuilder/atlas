@@ -104,6 +104,10 @@ BEAT_SCHEDULE: dict[str, dict] = {
         "task": "atlas.owners.generate_statements",
         "schedule": crontab(day_of_month="1", hour=6, minute=0),
     },
+    "expire-stale-approvals": {
+        "task": "atlas.approvals.expire_stale",
+        "schedule": crontab(minute="*/30"),
+    },
     "verify-audit-chains": {
         "task": "atlas.audit.verify_chains",
         "schedule": crontab(hour=1, minute=0),

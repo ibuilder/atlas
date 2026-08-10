@@ -411,3 +411,46 @@ def test_outstanding_payable_counts_only_open_bills(
     db.session.commit()
 
     assert outstanding_payable(db.session, org_id=org.id) == Decimal("300.0000")
+
+
+def test_a_bill_edited_after_approval_cannot_be_paid(
+    db, org, scope, accounts, vendor_record, operating_account
+):
+    """The approver authorised $4,200. Nobody authorised $42,000."""
+    from app.errors import ApprovalRequired
+
+    _set_threshold(db, org, "1000.00")
+    bill = _bill(db, org, accounts, vendor_record, "4200.00")
+    approve_bill(db.session, bill=bill, approver_id=APPROVER)
+    db.session.commit()
+    assert bill.approved_total == Decimal("4200.0000")
+
+    bill.total = Decimal("42000.00")
+    bill.balance = Decimal("42000.00")
+    db.session.commit()
+
+    with pytest.raises(ApprovalRequired):
+        pay_bill(
+            db.session,
+            bill=bill,
+            bank_account_id=operating_account.id,
+            amount=Decimal("42000.00"),
+            paid_date=dt.date.today(),
+        )
+
+
+def test_an_unchanged_bill_still_pays(db, org, scope, accounts, vendor_record, operating_account):
+    _set_threshold(db, org, "1000.00")
+    bill = _bill(db, org, accounts, vendor_record, "4200.00")
+    approve_bill(db.session, bill=bill, approver_id=APPROVER)
+    db.session.commit()
+
+    payment = pay_bill(
+        db.session,
+        bill=bill,
+        bank_account_id=operating_account.id,
+        amount=Decimal("4200.00"),
+        paid_date=dt.date.today(),
+    )
+    db.session.commit()
+    assert payment.amount == Decimal("4200.0000")

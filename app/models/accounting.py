@@ -854,6 +854,10 @@ class Bill(TenantModel):
 
     approved_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     approved_by_id: Mapped[str | None] = mapped_column(GUID)
+    #: The total as it stood when it was approved. Payment compares against this,
+    #: so a bill edited from $4,200 to $42,000 after approval cannot be paid on
+    #: the strength of the old decision.
+    approved_total: Mapped[Decimal | None] = mapped_column(Money)
     journal_entry_id: Mapped[str | None] = mapped_column(
         GUID, ForeignKey("journal_entries.id", ondelete="RESTRICT"), index=True
     )

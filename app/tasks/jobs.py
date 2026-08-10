@@ -388,3 +388,31 @@ def generate_owner_statements(
 
     JOB_RUNS.labels("generate_owner_statements", "success").inc()
     return {"statements": produced, "period": f"{start} to {end}"}
+
+
+@celery_app.task(name="atlas.approvals.expire_stale")
+def expire_stale_approvals() -> dict:
+    """Lapse approvals nobody decided.
+
+    Idempotent: an approval already expired is not touched, so the sweep can run
+    as often as it likes.
+    """
+    from app.services.automation.approvals import expire_stale_approvals as run_sweep
+
+    session = _session()
+    expired = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                expired += run_sweep(session, org_id=organization.id)
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "approval expiry failed for an organization",
+                    extra={"event": "approvals.sweep_failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("expire_stale_approvals", "success").inc()
+    return {"expired": expired}
