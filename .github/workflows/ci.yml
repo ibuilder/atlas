@@ -102,10 +102,17 @@ jobs:
       - name: Verify schema invariants
         run: python -c "from app.models.registry import validate_schema; validate_schema(); print('schema invariants OK')"
 
-      - name: Run tests
+      - name: Run tests (SQLite)
+        if: matrix.database == 'sqlite'
         env:
           ATLAS_ENV: testing
-          DATABASE_URL: ${{ matrix.database == 'postgres' && 'postgresql+psycopg://atlas:atlas@localhost:5432/atlas_test' || '' }}
+        run: pytest --cov=app --cov-report=xml --cov-report=term-missing
+
+      - name: Run tests (PostgreSQL)
+        if: matrix.database == 'postgres'
+        env:
+          ATLAS_ENV: testing
+          DATABASE_URL: postgresql+psycopg://atlas:atlas@localhost:5432/atlas_test
         run: pytest --cov=app --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage
@@ -197,9 +204,12 @@ jobs:
           artifact-name: atlas-sbom.spdx.json
 
       - name: Scan image for vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: atlas-pmos:ci
           format: table
           severity: HIGH,CRITICAL
+          # Reported, not gated. A base-image CVE published overnight should
+          # not block an unrelated pull request; it should be visible and
+          # triaged.
           exit-code: "0"

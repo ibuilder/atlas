@@ -24,7 +24,10 @@ class TestSettings(Settings):
     env: str = "testing"  # type: ignore[assignment]
     testing: bool = True
     debug: bool = False
-    database_url: str = os.getenv("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+    # `or` rather than a getenv default: CI matrices routinely set the variable
+    # to an empty string for the branch that does not want it, and an empty
+    # string is not a valid DSN.
+    database_url: str = os.getenv("DATABASE_URL") or "sqlite+pysqlite:///:memory:"
     force_https: bool = False
     session_cookie_secure: bool = False
     csrf_enabled: bool = False  # exercised explicitly in tests/security
