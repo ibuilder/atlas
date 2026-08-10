@@ -32,6 +32,7 @@ from app.security.crypto import compare_digest
 __all__ = [
     "AUTH_ATTEMPTS",
     "AUDIT_EVENTS",
+    "AUTOMATION_RUNS",
     "DELINQUENCY_NOTICES",
     "HTTP_REQUESTS",
     "HTTP_REQUEST_DURATION",
@@ -118,6 +119,11 @@ SLA_BREACHES = Counter(
     "atlas_maintenance_sla_breaches_total",
     "Work orders that breached their SLA.",
     ["priority"],
+)
+AUTOMATION_RUNS = Counter(
+    "atlas_automation_runs_total",
+    "Automation rule runs by outcome.",
+    ["outcome"],
 )
 DOCUMENTS_SCANNED = Counter(
     "atlas_document_scans_total",

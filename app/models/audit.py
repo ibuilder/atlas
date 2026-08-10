@@ -168,6 +168,9 @@ class AuditAction:
     # Automation and integration
     AUTOMATION_TRIGGERED = "automation.triggered"
     AUTOMATION_ACTION_EXECUTED = "automation.action_executed"
+    AUTOMATION_RULE_FAILED = "automation.rule_failed"
+    AUTOMATION_RULE_DISABLED = "automation.rule_disabled"
+    AUTOMATION_CASCADE_BLOCKED = "automation.cascade_blocked"
     APPROVAL_REQUESTED = "approval.requested"
     APPROVAL_GRANTED = "approval.granted"
     APPROVAL_REJECTED = "approval.rejected"

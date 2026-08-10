@@ -41,6 +41,7 @@ from app.models.vendor import Vendor
 from app.observability import SLA_BREACHES
 from app.services.audit.recorder import record_audit_event
 from app.services.common.numbering import next_number
+from app.services.events import emit_domain_event
 
 __all__ = [
     "create_request",
@@ -281,7 +282,39 @@ def create_work_order(
         org_id=org_id,
         session=session,
     )
+
+    emit_domain_event(
+        session,
+        org_id=org_id,
+        event_type="work_order.created",
+        aggregate_type="work_order",
+        aggregate_id=work_order.id,
+        payload=_work_order_payload(work_order),
+        actor_id=actor_id,
+    )
     return work_order
+
+
+def _work_order_payload(work_order: WorkOrder) -> dict:
+    """What a rule or a webhook subscriber gets to see about a work order."""
+    return {
+        "work_order_number": work_order.work_order_number,
+        "title": work_order.title,
+        "trade": work_order.trade,
+        "priority": work_order.priority.value,
+        "status": work_order.status.value,
+        "property_id": work_order.property_id,
+        "unit_id": work_order.unit_id,
+        "vendor_id": work_order.vendor_id,
+        "assigned_user_id": work_order.assigned_user_id,
+        "estimated_cost": (
+            str(work_order.estimated_cost) if work_order.estimated_cost is not None else None
+        ),
+        "is_resident_billable": work_order.is_resident_billable,
+        "resolution_due_at": (
+            work_order.resolution_due_at.isoformat() if work_order.resolution_due_at else None
+        ),
+    }
 
 
 def transition_work_order(
@@ -414,6 +447,15 @@ def transition_work_order(
             session=session,
         )
 
+    emit_domain_event(
+        session,
+        org_id=work_order.org_id,
+        event_type=f"work_order.{target.value}",
+        aggregate_type="work_order",
+        aggregate_id=work_order.id,
+        payload={**_work_order_payload(work_order), "previous_status": previous.value},
+        actor_id=actor_id,
+    )
     return work_order
 
 

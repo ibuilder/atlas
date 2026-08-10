@@ -11,6 +11,7 @@ what would make us revisit it. A decision without a stated cost is advocacy.
 | [0004](#adr-0004) | Centralised policy-based authorization | Accepted |
 | [0005](#adr-0005) | Document and asset graphs as the strategic differentiator | Accepted |
 | [0006](#adr-0006) | AI deferred behind governance controls | Accepted |
+| [0007](#adr-0007) | Automation rules are data, and dry run is structural | Accepted |
 
 ---
 
@@ -145,3 +146,36 @@ rather than needing it retrofitted.
 **Revisit when** a specific workflow has a measurable error cost and a human
 checkpoint that genuinely reduces it. Invoice coding and maintenance triage are
 the strongest candidates. "Add AI" is not a trigger; a benchmarked workflow is.
+
+---
+
+## ADR-0007 — Automation rules are data, and dry run is structural {#adr-0007}
+
+**Context.** A rule engine lets somebody who cannot deploy code cause arbitrary
+changes to production data. Two failure modes follow directly. The first is
+injection: if conditions are expressed in anything evaluated as code, a rule
+author is a remote code execution away from the database. The second is the
+untested rule that goes live and sends four hundred pay-or-quit notices.
+
+**Decision.** Conditions are a JSON tree walked by a fixed operator table — no
+`eval`, no attribute access, no regular expressions, and bounded depth. Actions
+are registered handlers split into two functions: `describe`, which reads, and
+`apply`, which writes. A dry run calls only `describe`.
+
+**Consequences.** The sandbox holds by construction rather than by review: there
+is no path from a condition to a Python object, so there is nothing to escape
+from. Dry run cannot mutate, because in dry run the mutating function is never
+called — as opposed to the usual design, where one function checks a `dry_run`
+flag and the guarantee lasts exactly until somebody forgets to check it.
+
+The costs are real. Every action is written twice, and the two halves can drift:
+`describe` can claim something `apply` does not do. The operator vocabulary is
+deliberately small, so some conditions are not expressible and have to become
+code. And omitting regular expressions means pattern matching is limited to
+prefix, suffix, and substring — chosen because a catastrophically backtracking
+pattern is a denial of service that looks like a typo.
+
+**Revisit when** rule authors repeatedly hit the vocabulary's edges. The answer
+then is more operators, each with bounded cost — not a general expression
+language.
+

@@ -12,6 +12,26 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Automation rule engine** (roadmap 3.1). Conditions are data, not code: a
+  JSON tree walked by a fixed operator table, with no `eval`, no attribute
+  access, no regular expressions, and bounded depth - so there is no path from
+  a rule to a Python object and nothing to escape from. Actions are registered
+  handlers split into a reading `describe` and a writing `apply`; a dry run
+  calls only `describe`, which makes "a dry run changes nothing" a structural
+  guarantee rather than a flag somebody has to remember to check.
+
+  Rules start inactive and in dry run, and promotion to live is refused unless
+  a dry run that did not fail is already on file. Editing the logic of a live
+  rule returns it to dry run. Cascades terminate: a rule cannot re-enter its
+  own chain, and no chain exceeds three hops. A runaway rule burns its own
+  hourly quota, and consecutive failures take it out of service.
+- Domain events are now announced through a single function that writes the
+  outbox row and dispatches automation rules in the caller's transaction, so
+  a webhook and a rule can never disagree about what happened. Work-order
+  creation and every lifecycle transition emit.
+- ADR-0007 records why the condition language is deliberately small, and what
+  that costs.
+
 - **Owner statements and distributions** (roadmap 2.4). Statements resolve
   *temporal* ownership: a property sold mid-period apportions by days held, so
   both the outgoing and incoming owner are paid for exactly the days they owned
