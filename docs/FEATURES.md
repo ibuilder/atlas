@@ -121,7 +121,7 @@ feature list is how a buyer discovers the gap during implementation.
 | Signed webhooks with retry and DLQ | **Complete** | HMAC-SHA256 with the timestamp inside the signed string, exponential backoff to a 6h ceiling, dead-lettering, endpoint auto-disable, operator replay, and SSRF protection on customer-supplied URLs. |
 | Inbound webhook deduplication | **Complete** | Payment capture is idempotent by provider event id. |
 | KPI dashboards | **Complete** | Computed live; the snapshot projection table is **Modelled**. |
-| Scheduled reports | **Modelled** | Schedule and run history are modelled; no generator. |
+| Scheduled reports | **Complete** | A registry of five reports (rent roll, trial balance, delinquency ageing, work-order SLA, vendor compliance) rendered to CSV, JSON, HTML, PDF, or XLSX. **Recipients resolve at send time** from user and role references, so a departed employee stops receiving the books the moment their account is disabled. Output is stored as a document, so retention and access control apply to it. Repeated failures take a schedule out of service. |
 
 ## Background jobs
 
@@ -135,5 +135,6 @@ feature list is how a buyer discovers the gap during implementation.
 | Delinquency sweep | **Complete** |
 | Owner statement generation | **Complete** |
 | Stale approval expiry | **Complete** |
+| Scheduled report delivery | **Complete** |
 | Preventive maintenance generation | **Complete** |
 | Webhook dispatch | **Complete** |

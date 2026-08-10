@@ -48,6 +48,8 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2,<4"]
+#: XLSX report output. Everything else renders with the standard library.
+reports = ["openpyxl>=3.1,<4"]
 dev = [
   "pytest>=8.3,<10",
   "pytest-cov>=5,<8",

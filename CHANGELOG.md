@@ -12,6 +12,22 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Scheduled reports** (roadmap 3.5). A registry of five reports - rent roll,
+  trial balance, delinquency ageing, work-order SLA, vendor compliance -
+  rendered to CSV, JSON, HTML, PDF, or XLSX. **Recipients resolve at send
+  time** from user and role references rather than stored addresses, which is
+  the whole point: a departed employee stops receiving the books the moment
+  their account is disabled, with no cleanup step to forget. Output is stored
+  as a document so retention and access control apply to it, the schedule's
+  watermark advances whether or not delivery worked, and repeated failures take
+  a schedule out of service.
+- PDF is written directly rather than through a headless browser, because a
+  report is a table of text and the alternative was a rendering engine in every
+  container for the sake of a rent roll. The costs are stated in the module:
+  WinAnsi encoding, and a fixed column grid rather than measured text.
+- XLSX needs the optional `openpyxl` dependency and says so plainly when it is
+  absent, rather than handing back a CSV with the wrong extension.
+
 - **Inspection workflow** (roadmap 3.4). The checklist is copied onto the
   inspection when it is scheduled rather than referenced, so a template edited
   in March cannot change what a February inspection appears to have asked. An

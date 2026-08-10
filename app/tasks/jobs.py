@@ -448,3 +448,33 @@ def generate_preventive_work() -> dict:
 
     JOB_RUNS.labels("generate_preventive_work", "success").inc()
     return {"generated": generated, "deferred": deferred}
+
+
+@celery_app.task(name="atlas.reports.run_due_schedules")
+def run_due_report_schedules() -> dict:
+    """Run and deliver every report schedule that has come due.
+
+    The schedule's watermark advances whether or not delivery worked, so a bad
+    recipient list costs one failed run rather than one run every minute.
+    """
+    from app.services.reporting.service import run_due_schedules
+
+    session = _session()
+    delivered = failed = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                outcome = run_due_schedules(session, org_id=organization.id)
+                delivered += outcome.delivered
+                failed += outcome.failed
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "scheduled reporting failed for an organization",
+                    extra={"event": "report.sweep_failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("run_due_report_schedules", "success").inc()
+    return {"delivered": delivered, "failed": failed}

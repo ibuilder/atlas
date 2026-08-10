@@ -81,7 +81,7 @@ cycle, and every notice carries a delivery record.
 
 ---
 
-## 0.3.0 — Automate
+## 0.3.0 — Automate ✅ *shipped*
 
 The theme: reduce manual orchestration. This is where the operational
 differentiation lives, and it is deliberately *after* the loop is closed —
@@ -93,7 +93,7 @@ automating a workflow that cannot complete is worse than not automating it.
 | 3.2 | **Approvals workflow** ✅ | S | 3.1 |
 | 3.3 | **Preventive maintenance generation** ✅ | S | — |
 | 3.4 | **Inspections** ✅ | M | 2.1 |
-| 3.5 | **Scheduled reports** | M | 2.1 |
+| 3.5 | **Scheduled reports** ✅ | M | 2.1 |
 
 **3.1 Automation rule engine.**
 A restricted condition evaluator — never `eval` — an action registry, retry and

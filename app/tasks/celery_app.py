@@ -108,6 +108,11 @@ BEAT_SCHEDULE: dict[str, dict] = {
         "task": "atlas.approvals.expire_stale",
         "schedule": crontab(minute="*/30"),
     },
+    "run-due-report-schedules": {
+        # Every quarter hour; the schedule's own cron decides what is actually due.
+        "task": "atlas.reports.run_due_schedules",
+        "schedule": crontab(minute="*/15"),
+    },
     "verify-audit-chains": {
         "task": "atlas.audit.verify_chains",
         "schedule": crontab(hour=1, minute=0),
