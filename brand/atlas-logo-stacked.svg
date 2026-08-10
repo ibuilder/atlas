@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 300" width="420" height="300"
+     role="img" aria-label="Atlas — Property Operations">
+  <title>Atlas — Property Operations</title>
+  <desc>Stacked lockup for square and portrait placements: mark above the wordmark,
+  descriptor beneath a rule carrying the blue coordinate tick.</desc>
+
+  <g transform="translate(150,10)">
+    <g fill="none" stroke="#F3EEE5">
+      <line x1="60" y1="4" x2="60" y2="116" stroke-width=".8" opacity=".26"/>
+      <line x1="4" y1="60" x2="116" y2="60" stroke-width=".8" opacity=".26"/>
+      <circle cx="60" cy="60" r="28" stroke-width=".9" stroke-dasharray="2 4" opacity=".34"/>
+      <circle cx="60" cy="60" r="40" stroke-width="1.4" opacity=".9"/>
+    </g>
+    <path d="M60 10 L53 53 L60 60 Z" fill="#C4855F"/>
+    <path d="M60 10 L60 60 L67 53 Z" fill="#A66345"/>
+    <path d="M110 60 L67 53 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M110 60 L60 60 L67 67 Z" fill="#F3EEE5" opacity=".45"/>
+    <path d="M60 110 L67 67 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M60 110 L60 60 L53 67 Z" fill="#F3EEE5" opacity=".45"/>
+    <path d="M10 60 L53 67 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M10 60 L60 60 L53 53 Z" fill="#F3EEE5" opacity=".45"/>
+    <circle cx="88.3" cy="31.7" r="2.6" fill="#4867A9"/>
+  </g>
+
+  <text x="210" y="196" text-anchor="middle"
+        font-family="'Cormorant Garamond','Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
+        font-size="58" font-weight="400" letter-spacing="19.7" fill="#F3EEE5"
+        dx="9.85">ATLAS</text>
+
+  <g>
+    <line x1="90" y1="224" x2="330" y2="224" stroke="#F3EEE5" stroke-width="1" opacity=".22"/>
+    <line x1="195" y1="224" x2="225" y2="224" stroke="#4867A9" stroke-width="2.4"/>
+  </g>
+
+  <text x="210" y="248" text-anchor="middle"
+        font-family="Inter,ui-sans-serif,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"
+        font-size="13" font-weight="500" letter-spacing="6.4" fill="#A66345"
+        dx="3.2">PROPERTY OPERATIONS</text>
+
+  <text x="210" y="278" text-anchor="middle"
+        font-family="Inter,ui-sans-serif,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"
+        font-size="15" fill="#D8D1C7">Property intelligence, made operational.</text>
+</svg>

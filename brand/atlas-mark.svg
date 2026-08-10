@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120"
+     role="img" aria-label="Atlas mark">
+  <title>Atlas</title>
+  <desc>A four-point compass rose on a drafting construction: outer ring, dashed working
+  radius, axes, a copper north arm, and a blue coordinate fix on the north-east bearing.</desc>
+
+  <!-- Construction grid. Centre (60,60). Outer ring r=40. Arms break the ring by 10
+       units so the mark reads as directional rather than contained. -->
+  <g fill="none" stroke="#F3EEE5">
+    <line x1="60" y1="4" x2="60" y2="116" stroke-width=".8" opacity=".26"/>
+    <line x1="4" y1="60" x2="116" y2="60" stroke-width=".8" opacity=".26"/>
+    <circle cx="60" cy="60" r="28" stroke-width=".9" stroke-dasharray="2 4" opacity=".34"/>
+    <circle cx="60" cy="60" r="40" stroke-width="1.4" opacity=".9"/>
+  </g>
+
+  <!-- Four-point rose. Each arm is two facets split along its tip-to-centre axis;
+       the counter-clockwise facet is lit. Adjacent arms share their waist points,
+       which is what gives the silhouette its continuous edge. -->
+  <g>
+    <!-- North: copper. The only coloured arm, so the mark always declares a heading. -->
+    <path d="M60 10 L53 53 L60 60 Z" fill="#C4855F"/>
+    <path d="M60 10 L60 60 L67 53 Z" fill="#A66345"/>
+
+    <!-- East -->
+    <path d="M110 60 L67 53 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M110 60 L60 60 L67 67 Z" fill="#F3EEE5" opacity=".45"/>
+
+    <!-- South -->
+    <path d="M60 110 L67 67 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M60 110 L60 60 L53 67 Z" fill="#F3EEE5" opacity=".45"/>
+
+    <!-- West -->
+    <path d="M10 60 L53 67 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M10 60 L60 60 L53 53 Z" fill="#F3EEE5" opacity=".45"/>
+  </g>
+
+  <!-- Coordinate fix: a plotted point on the north-east bearing. Deliberately off-axis
+       so it reads as a position on the map rather than a fifth compass arm. -->
+  <circle cx="88.3" cy="31.7" r="2.6" fill="#4867A9"/>
+</svg>

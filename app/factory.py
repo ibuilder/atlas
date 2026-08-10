@@ -110,8 +110,13 @@ def _init_persistence(app: Flask, settings: Settings) -> None:
     from app.extensions import db, migrate
     from app.models import registry  # noqa: F401  (imports every model)
     from app.models.base import install_tenancy_guard, set_strict_tenancy
+    from app.models.rls import install_rls_session_binding
 
     install_tenancy_guard()
+    # Layer three. A no-op on any dialect without row-level security, so the
+    # same code path runs against SQLite in tests.
+    if settings.db_enable_rls:
+        install_rls_session_binding()
     # Development keeps the guard permissive so a `flask shell` session is
     # usable; every other environment fails closed on an unscoped query.
     set_strict_tenancy(settings.env != "development")

@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120"
+     role="img" aria-label="Atlas mark">
+  <title>Atlas</title>
+  <desc>Compact Atlas mark for use below 32 pixels: rose, ring, and coordinate fix only.</desc>
+
+  <!-- Below about 32px the dashed radius and the axes turn to grey mush and the ring
+       closes up. This variant drops them, thickens the ring, and enlarges the fix so
+       the mark still resolves at favicon size. -->
+  <circle cx="60" cy="60" r="40" fill="none" stroke="#F3EEE5" stroke-width="3.4" opacity=".92"/>
+
+  <g>
+    <path d="M60 10 L52 52 L60 60 Z" fill="#C4855F"/>
+    <path d="M60 10 L60 60 L68 52 Z" fill="#A66345"/>
+    <path d="M110 60 L68 52 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M110 60 L60 60 L68 68 Z" fill="#F3EEE5" opacity=".45"/>
+    <path d="M60 110 L68 68 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M60 110 L60 60 L52 68 Z" fill="#F3EEE5" opacity=".45"/>
+    <path d="M10 60 L52 68 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M10 60 L60 60 L52 52 Z" fill="#F3EEE5" opacity=".45"/>
+  </g>
+
+  <circle cx="88.3" cy="31.7" r="5" fill="#4867A9"/>
+</svg>

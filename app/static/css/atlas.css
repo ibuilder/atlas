@@ -123,10 +123,47 @@ code, pre, .mono { font-family: var(--mono); font-size: 0.86em; }
   font-size: 0.56rem;
   letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--copper);
+  /* --copper measures 3.80:1 on the dark ground, which is AA-large only and this
+     is 9px. --copper-lit is 5.35:1 and passes. See docs/BRAND.md. */
+  color: var(--copper-lit);
   margin-top: 5px;
 }
 .tagline { color: var(--fg-mute); font-size: 0.95rem; }
+
+/* Stacked lockup: mark, wordmark, ruled descriptor. */
+.lockup { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); }
+.lockup__name {
+  font-family: var(--serif);
+  font-size: 2.1rem;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em; /* balances the trailing letterspace so it optically centres */
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--fg);
+}
+.lockup__rule {
+  position: relative;
+  width: 220px;
+  height: 1px;
+  background: var(--line-strong);
+}
+.lockup__rule::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -1px;
+  width: 30px;
+  height: 3px;
+  transform: translateX(-50%);
+  background: var(--blue);
+}
+.lockup__sub {
+  font-size: .6rem;
+  letter-spacing: .28em;
+  text-indent: .28em;
+  text-transform: uppercase;
+  color: var(--copper-lit); /* not --copper: 3.80:1 fails at this size. See docs/BRAND.md */
+}
 
 /* Hairline rule with the blue coordinate tick from the mark. */
 .rule {

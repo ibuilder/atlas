@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120"
+     fill="currentColor" role="img" aria-label="Atlas mark">
+  <title>Atlas</title>
+  <desc>Single-colour Atlas mark. Inherits the surrounding text colour, for embossing,
+  engraving, favicons, and any surface where the palette is not available.</desc>
+
+  <!-- Everything inherits `currentColor`; the facet distinction is carried by opacity
+       alone, so the mark survives being reproduced in one ink. -->
+  <g fill="none" stroke="currentColor">
+    <circle cx="60" cy="60" r="40" stroke-width="1.4" opacity=".9"/>
+  </g>
+  <g>
+    <path d="M60 10 L53 53 L60 60 Z"/>
+    <path d="M60 10 L60 60 L67 53 Z" opacity=".55"/>
+    <path d="M110 60 L67 53 L60 60 Z"/>
+    <path d="M110 60 L60 60 L67 67 Z" opacity=".55"/>
+    <path d="M60 110 L67 67 L60 60 Z"/>
+    <path d="M60 110 L60 60 L53 67 Z" opacity=".55"/>
+    <path d="M10 60 L53 67 L60 60 Z"/>
+    <path d="M10 60 L60 60 L53 53 Z" opacity=".55"/>
+  </g>
+  <circle cx="88.3" cy="31.7" r="2.6"/>
+</svg>

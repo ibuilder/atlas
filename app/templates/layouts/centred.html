@@ -1,11 +1,11 @@
 {# Single-card layout for sign-in, errors, and other standalone pages.
    SPDX-License-Identifier: MIT #}
 {% extends "layouts/base.html" %}
-{% from "components/brand.html" import wordmark %}
+{% from "components/brand.html" import lockup %}
 
 {% block body %}
 <div class="centred">
-  {{ wordmark(46) }}
+  {{ lockup(62) }}
   <p class="tagline">{{ app_tagline }}</p>
   <div class="card">
     {% with messages = get_flashed_messages(with_categories=true) %}

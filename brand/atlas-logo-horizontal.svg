@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 120" width="520" height="120"
+     role="img" aria-label="Atlas — Property Operations">
+  <title>Atlas — Property Operations</title>
+  <desc>Horizontal lockup: compass mark, ATLAS wordmark, and the PROPERTY OPERATIONS
+  descriptor, separated by a rule carrying the blue coordinate tick.</desc>
+
+  <!-- Lockup geometry, expressed in cap-heights (the wordmark cap-height is 34):
+       mark occupies 0-120, gap is one cap-height (34), wordmark starts at 154.
+       Clear space on all sides equals the mark's ring radius (40). -->
+
+  <g transform="translate(0,0)">
+    <g fill="none" stroke="#F3EEE5">
+      <line x1="60" y1="4" x2="60" y2="116" stroke-width=".8" opacity=".26"/>
+      <line x1="4" y1="60" x2="116" y2="60" stroke-width=".8" opacity=".26"/>
+      <circle cx="60" cy="60" r="28" stroke-width=".9" stroke-dasharray="2 4" opacity=".34"/>
+      <circle cx="60" cy="60" r="40" stroke-width="1.4" opacity=".9"/>
+    </g>
+    <path d="M60 10 L53 53 L60 60 Z" fill="#C4855F"/>
+    <path d="M60 10 L60 60 L67 53 Z" fill="#A66345"/>
+    <path d="M110 60 L67 53 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M110 60 L60 60 L67 67 Z" fill="#F3EEE5" opacity=".45"/>
+    <path d="M60 110 L67 67 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M60 110 L60 60 L53 67 Z" fill="#F3EEE5" opacity=".45"/>
+    <path d="M10 60 L53 67 L60 60 Z" fill="#F3EEE5"/>
+    <path d="M10 60 L60 60 L53 53 Z" fill="#F3EEE5" opacity=".45"/>
+    <circle cx="88.3" cy="31.7" r="2.6" fill="#4867A9"/>
+  </g>
+
+  <!-- Wordmark. Live text rather than outlines: see brand/README.md for the one-line
+       command that converts this to paths for production distribution. -->
+  <text x="154" y="60"
+        font-family="'Cormorant Garamond','Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
+        font-size="46" font-weight="400" letter-spacing="15.6" fill="#F3EEE5"
+        dominant-baseline="middle">ATLAS</text>
+
+  <!-- Hairline rule with the coordinate tick, echoing the mark's blue fix. -->
+  <g>
+    <line x1="156" y1="78" x2="500" y2="78" stroke="#F3EEE5" stroke-width="1" opacity=".22"/>
+    <line x1="322" y1="78" x2="352" y2="78" stroke="#4867A9" stroke-width="2.4"/>
+  </g>
+
+  <text x="156" y="98"
+        font-family="Inter,ui-sans-serif,-apple-system,'Segoe UI',Roboto,Arial,sans-serif"
+        font-size="13" font-weight="500" letter-spacing="6.4" fill="#A66345">PROPERTY OPERATIONS</text>
+</svg>
