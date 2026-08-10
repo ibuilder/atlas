@@ -19,7 +19,7 @@ feature list is how a buyer discovers the gap during implementation.
 
 | Capability | Status | Notes |
 |---|---|---|
-| Multi-organization tenancy | **Complete** | Three enforcement layers; PostgreSQL RLS policies are **Modelled** — the migration is not yet written. |
+| Multi-organization tenancy | **Complete** | Three enforcement layers: service scoping, an ORM guard, and PostgreSQL row-level security applied by migration. A build-failing invariant catches a tenant table that escapes any of them. |
 | RBAC + ABAC authorization | **Complete** | Organization, portfolio, and property scopes; portal ownership predicates; exhaustive test matrix. |
 | Tamper-evident audit trail | **Complete** | Per-organization hash chain, verification endpoint, scheduled integrity check. |
 | Versioned REST API | **Complete** | Cursor pagination, idempotency keys, ETags, stable error envelope. |
@@ -115,8 +115,8 @@ feature list is how a buyer discovers the gap during implementation.
 |---|---|---|
 | Rule engine | **Modelled** | Rules, runs, steps, dry-run flag, throttles, and auto-disable are modelled; no evaluator. |
 | Approvals with separation of duties | **Modelled** | `can_be_decided_by()` enforces requester ≠ approver; no workflow. |
-| Transactional outbox | **Modelled** | Schema present; no publisher. |
-| Signed webhooks with retry and DLQ | **Partial** | Endpoints, deliveries, signing secrets, and backoff are modelled; the dispatcher reports what *would* send rather than sending. |
+| Transactional outbox | **Complete** | Events written in the caller's transaction; a separate dispatcher publishes. |
+| Signed webhooks with retry and DLQ | **Complete** | HMAC-SHA256 with the timestamp inside the signed string, exponential backoff to a 6h ceiling, dead-lettering, endpoint auto-disable, operator replay, and SSRF protection on customer-supplied URLs. |
 | Inbound webhook deduplication | **Complete** | Payment capture is idempotent by provider event id. |
 | KPI dashboards | **Complete** | Computed live; the snapshot projection table is **Modelled**. |
 | Scheduled reports | **Modelled** | Schedule and run history are modelled; no generator. |
@@ -132,4 +132,4 @@ feature list is how a buyer discovers the gap during implementation.
 | Recurring charge generation | **Modelled** (scheduled, not implemented) |
 | Delinquency sweep | **Modelled** (scheduled, not implemented) |
 | Preventive maintenance generation | **Modelled** (scheduled, not implemented) |
-| Webhook dispatch | **Partial** (counts due work, does not deliver) |
+| Webhook dispatch | **Complete** |

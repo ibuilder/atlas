@@ -26,6 +26,7 @@ stays within your own deployment.
 | Input validation | Strict schemas that reject unknown fields; HTML stripped at the boundary. |
 | Rate limiting | Per identity when authenticated, per IP otherwise. |
 | Idempotency | Retried writes replay; the same key with a different body is rejected. |
+| Outbound webhooks | HMAC-SHA256 signatures with the timestamp inside the signed string; customer-supplied URLs are refused when they resolve to private, loopback, or link-local addresses. |
 | Secrets | Configuration only, typed as `SecretStr`. Production refuses to start on a weak or placeholder secret. |
 
 ## Deployment expectations
@@ -71,12 +72,14 @@ Stated plainly rather than left to be discovered:
 
 - **No SSO.** `idp_issuer` and `idp_subject` exist on `User`; no protocol
   implementation. Enterprise deployments needing SAML or OIDC should wait.
-- **Document upload is not implemented.** Malware scanning and quarantine are
-  modelled but not wired, so no file-handling path is live to attack — and none
-  is available to use.
+- **The bundled malware scanner is not virus detection.** Upload, quarantine,
+  release, and retrieval are implemented, and the scanner is pluggable — a
+  ClamAV adapter ships and fails closed when the daemon is unreachable. The
+  *default* adapter performs structural checks only: the EICAR test file,
+  embedded JavaScript, and Office macros. It will not catch a novel threat.
+  Configure a real scanner before accepting untrusted uploads.
 - **The automation engine does not execute.** Rules can be stored but not run,
   so no automated action can fire unexpectedly.
-- **Webhook delivery does not send.** Nothing leaves the system over that path.
 
 ## Cryptography
 

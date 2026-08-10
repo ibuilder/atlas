@@ -251,32 +251,31 @@ def purge_expired() -> dict:
 
 @celery_app.task(name="atlas.webhooks.dispatch_pending")
 def dispatch_pending_webhooks() -> dict:
-    """Deliver queued webhook attempts that are due.
+    """Fan out the outbox and deliver everything whose backoff has elapsed.
 
-    Placeholder for the delivery loop: the outbox, delivery records, signing
-    secrets, and backoff schedule are modelled and migrated, but the HTTP
-    dispatcher is not implemented yet. It returns a count of what *would* be
-    delivered rather than pretending to have delivered it.
+    Idempotent at both stages: fan-out is absorbed by the unique constraint on
+    (endpoint, event), and a delivery already marked delivered is no longer due.
     """
-    from app.models.integration import DeliveryStatus, WebhookDelivery
-    from app.models.types import utcnow
+    from app.services.integration.webhooks import deliver_due, fan_out_pending
 
     session = _session()
-    due = 0
+    fanned = delivered = failed = dead = 0
+
     for organization in _organizations():
         with use_context(system_context("task", org_id=organization.id)):
-            due += len(
-                list(
-                    session.execute(
-                        select(WebhookDelivery).where(
-                            WebhookDelivery.status.in_(
-                                [DeliveryStatus.PENDING, DeliveryStatus.RETRYING]
-                            ),
-                            WebhookDelivery.next_attempt_at <= utcnow(),
-                        )
-                    ).scalars()
+            try:
+                fanned += fan_out_pending(session, org_id=organization.id)
+                outcome = deliver_due(session, org_id=organization.id)
+                delivered += outcome.delivered
+                failed += outcome.failed
+                dead += outcome.dead_lettered
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "webhook dispatch failed for an organization",
+                    extra={"event": "webhook.dispatch_failed", "org_id": organization.id},
                 )
-            )
 
-    JOB_RUNS.labels("dispatch_pending_webhooks", "skipped_duplicate").inc()
-    return {"due": due, "delivered": 0, "status": "dispatcher_not_implemented"}
+    JOB_RUNS.labels("dispatch_pending_webhooks", "success").inc()
+    return {"fanned_out": fanned, "delivered": delivered, "failed": failed, "dead_lettered": dead}
