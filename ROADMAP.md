@@ -31,7 +31,7 @@ current release a core rather than a product.
 |---|---|---|---|
 | 2.1 | **Document storage and upload** ✅ | M | — |
 | 2.2 | **Webhook delivery** ✅ | S | — |
-| 2.3 | **Accounts payable: approval and disbursement** | M | — |
+| 2.3 | **Accounts payable: approval and disbursement** ✅ | M | — |
 | 2.4 | **Owner statements and distributions** | M | 2.3 |
 | 2.5 | **Recurring charge generation** | S | — |
 | 2.6 | **Delinquency sweep and notices** | S | 2.5 |

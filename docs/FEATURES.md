@@ -70,9 +70,9 @@ feature list is how a buyer discovers the gap during implementation.
 | Trial balance | **Complete** | Exposed via API and console. |
 | Accounts receivable | **Complete** | Invoicing, payment capture, application, overpayment credit, void. |
 | Period close and reopen | **Complete** | Approval-gated close; reopening demands a reason and audits as critical. |
-| Accounts payable | **Modelled** | Bills, lines, and payments are modelled with duplicate-invoice prevention; no approval or disbursement service. |
+| Accounts payable | **Complete** | Bill recording with ledger posting, threshold-based approval routing, separation of duties enforced by identity, disbursement, and duplicate-invoice prevention. |
 | Bank reconciliation | **Modelled** | Reconciliation and exception schema exist; no matching engine. |
-| Trust accounting | **Partial** | Structural separation, flags, and constraints are enforced; no dedicated trust reconciliation. |
+| Trust accounting | **Partial** | Structural separation, flags, and constraints are enforced, and a trust account is refused as the source of an operating disbursement; no dedicated trust reconciliation yet. |
 | Owner statements and distributions | **Modelled** | Schema complete; no generator. |
 | 1099 / tax reporting | **Modelled** | `is_1099_reportable` flags present; no year-end export. |
 
