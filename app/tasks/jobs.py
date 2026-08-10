@@ -176,6 +176,56 @@ def verify_audit_chains() -> dict:
     return {"checked": len(results), "broken": len(broken)}
 
 
+@celery_app.task(name="atlas.documents.scan", bind=True, max_retries=5)
+def scan_document(self, document_id: str) -> dict:  # noqa: ANN001
+    """Scan a quarantined upload and release or hold it.
+
+    Idempotent: an already-scanned document is a no-op, so redelivery cannot
+    move a released file back into quarantine.
+    """
+    from app.models.documents import Document, ScanStatus
+    from app.services.documents.scanner import get_scanner
+    from app.services.documents.service import record_scan_result
+    from app.services.documents.storage import get_storage
+
+    session = _session()
+
+    with use_context(system_context("task")):
+        from app.models.base import unscoped
+
+        with unscoped(session):
+            document = session.get(Document, document_id)
+
+        if document is None:
+            log.warning(
+                "scan requested for a document that does not exist",
+                extra={"event": "document.scan_missing", "document_id": document_id},
+            )
+            JOB_RUNS.labels("scan_document", "skipped_duplicate").inc()
+            return {"document_id": document_id, "status": "not_found"}
+
+        if document.scan_status != ScanStatus.PENDING:
+            JOB_RUNS.labels("scan_document", "skipped_duplicate").inc()
+            return {"document_id": document_id, "status": str(document.scan_status)}
+
+        with use_context(system_context("task", org_id=document.org_id)):
+            try:
+                stream = get_storage().get(document.storage_key)
+                result = get_scanner().scan(stream)
+            except Exception as exc:  # noqa: BLE001
+                session.rollback()
+                JOB_RUNS.labels("scan_document", "retry").inc()
+                # The document stays quarantined while we retry. Failing open
+                # would release unscanned files whenever the scanner blinks.
+                raise self.retry(exc=exc, countdown=60) from exc
+
+            record_scan_result(session, document=document, clean=result.clean, detail=result.detail)
+            session.commit()
+
+    JOB_RUNS.labels("scan_document", "success").inc()
+    return {"document_id": document_id, "clean": result.clean, "detail": result.detail}
+
+
 @celery_app.task(name="atlas.maintenance.purge_expired")
 def purge_expired() -> dict:
     """Drop expired sessions and idempotency records."""

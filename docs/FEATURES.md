@@ -101,9 +101,11 @@ feature list is how a buyer discovers the gap during implementation.
 
 | Capability | Status | Notes |
 |---|---|---|
-| Document graph (polymorphic links) | **Modelled** | The edge table and retention classes are the differentiating design; no upload service yet. |
-| Storage adapters, signed URLs | **Seam** | Settings and interface defined; local and S3 adapters not implemented. |
-| Malware scanning | **Seam** | Quarantine-by-default is modelled; no scanner integration. |
+| Document graph (polymorphic links) | **Complete** | One object, many relationships; deduplicated by content digest. |
+| Upload, validation, storage | **Complete** | Magic-byte sniffing, extension allowlist, size cap, generated keys, local and S3 adapters. |
+| Quarantine and scanning | **Partial** | The pipeline is complete — quarantine on arrival, scan, release or hold. The default scanner performs *structural* checks only (EICAR, active content); a ClamAV adapter is included but a real deployment must configure one. |
+| Signed expiring retrieval | **Complete** | Time-limited tokens, attributable to the actor they were issued to, refused for quarantined objects. |
+| Retention and legal hold | **Complete** | Retention derived from document category; a hold outranks every rule. |
 | OCR and extraction | **Seam** | Fields and status modelled; no pipeline. |
 | Asset registry, warranties, service history | **Modelled** | Includes warranty lookup and replacement forecasting logic on the model. |
 

@@ -1,0 +1,373 @@
+"""Document upload, quarantine, the link graph, and signed retrieval.
+
+The upload path is the largest untrusted-input surface in the product, so these
+are security tests before they are feature tests.
+
+SPDX-License-Identifier: MIT
+"""
+
+from __future__ import annotations
+
+import io
+
+import pytest
+
+from app.errors import BusinessRuleViolation, ValidationFailed
+from app.models.documents import Document, ScanStatus
+from app.services.documents import service as documents
+from app.services.documents.scanner import StructuralScanner
+from app.services.documents.storage import (
+    build_storage_key,
+    sniff_content_type,
+    validate_filename,
+)
+
+pytestmark = [pytest.mark.security, pytest.mark.integration]
+
+PDF = b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+EICAR = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+
+
+def _upload(db, org, payload: bytes, filename: str, **kwargs):
+    return documents.upload_document(
+        db.session,
+        org_id=org.id,
+        stream=io.BytesIO(payload),
+        filename=filename,
+        declared_content_type=kwargs.pop("declared", None),
+        **kwargs,
+    )
+
+
+# --------------------------------------------------------------- validation
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["payload.php", "shell.sh", "app.exe", "lib.so", "archive.tar.gz.js", "noextension"],
+)
+def test_disallowed_extensions_are_refused(filename):
+    with pytest.raises(ValidationFailed):
+        validate_filename(filename)
+
+
+def test_path_components_are_stripped_from_the_display_name():
+    """A client may legitimately send a path; the directory is never wanted."""
+    safe, suffix = validate_filename("../../../etc/passwd.pdf")
+    assert "/" not in safe and "\\" not in safe
+    assert ".." not in safe
+    assert suffix == ".pdf"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b"<?php system($_GET[0]); ?>", b"MZ\x90\x00", b"\x7fELF\x02", b"#!/bin/sh\nrm -rf /"],
+)
+def test_executable_content_is_refused_whatever_the_extension(payload):
+    """The extension is a claim. The first bytes are the fact."""
+    with pytest.raises(ValidationFailed):
+        sniff_content_type(payload, "application/pdf", "invoice.pdf")
+
+
+def test_declared_type_contradicting_content_is_refused():
+    with pytest.raises(ValidationFailed, match="does not match"):
+        sniff_content_type(PNG, "application/pdf", "statement.pdf")
+
+
+def test_matching_declaration_is_accepted():
+    assert sniff_content_type(PDF, "application/pdf", "lease.pdf") == "application/pdf"
+    assert sniff_content_type(PNG, "image/png", "photo.png") == "image/png"
+
+
+def test_jpeg_aliases_do_not_fight():
+    """image/jpg and image/jpeg are the same thing to everyone except a parser."""
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+    assert sniff_content_type(jpeg, "image/jpg", "photo.jpg") == "image/jpeg"
+
+
+def test_storage_key_never_contains_the_filename():
+    """Keys built from user input leak resident names and invite traversal."""
+    key = build_storage_key(tenant_prefix="org/acme", extension=".pdf")
+    assert "lease" not in key
+    assert key.startswith("quarantine/org/acme/")
+    assert key.endswith(".pdf")
+    assert build_storage_key(tenant_prefix="org/acme", extension=".pdf") != key
+
+
+def test_oversized_upload_is_refused(db, org, scope, app):
+    limit = app.config["SETTINGS"].upload_max_bytes
+    with pytest.raises(ValidationFailed, match="exceeds"):
+        _upload(db, org, b"%PDF-" + b"\x00" * (limit + 10), "huge.pdf")
+
+
+def test_empty_upload_is_refused(db, org, scope):
+    with pytest.raises(ValidationFailed, match="empty"):
+        _upload(db, org, b"", "empty.pdf")
+
+
+# ------------------------------------------------------------------ upload
+
+
+def test_upload_stores_metadata_and_digest(db, org, scope):
+    document = _upload(db, org, PDF, "Lease Agreement.pdf", declared="application/pdf")
+    db.session.commit()
+
+    assert document.content_type == "application/pdf"
+    assert document.size_bytes == len(PDF)
+    assert len(document.checksum_sha256) == 64
+    assert document.original_filename == "Lease Agreement.pdf"
+    assert document.retention_until is not None
+
+
+def test_identical_content_is_deduplicated(db, org, scope):
+    """One lease PDF attached from three places is one object, not three."""
+    first = _upload(db, org, PDF, "lease.pdf", declared="application/pdf")
+    second = _upload(db, org, PDF, "lease-copy.pdf", declared="application/pdf")
+    db.session.commit()
+
+    assert first.id == second.id
+    assert db.session.query(Document).count() == 1
+
+
+# -------------------------------------------------------------- quarantine
+
+
+def test_uploads_are_quarantined_and_unservable(db, org, scope, app):
+    app.config["SETTINGS"].malware_scan_required = True
+    try:
+        document = _upload(db, org, PDF, "unscanned.pdf", declared="application/pdf")
+        db.session.commit()
+
+        assert document.is_quarantined
+        assert document.scan_status == ScanStatus.PENDING
+        assert not document.is_servable
+        assert document.storage_key.startswith("quarantine/")
+
+        with pytest.raises(BusinessRuleViolation, match="still being scanned"):
+            documents.open_document(db.session, document=document)
+    finally:
+        app.config["SETTINGS"].malware_scan_required = False
+
+
+def test_clean_scan_releases_the_document(db, org, scope, app):
+    app.config["SETTINGS"].malware_scan_required = True
+    try:
+        document = _upload(db, org, PDF, "clean.pdf", declared="application/pdf")
+        db.session.commit()
+
+        documents.record_scan_result(db.session, document=document, clean=True)
+        db.session.commit()
+
+        assert document.scan_status == ScanStatus.CLEAN
+        assert not document.is_quarantined
+        assert document.is_servable
+        # Promoted out of the quarantine prefix, so the two populations stay
+        # physically separate in the bucket.
+        assert not document.storage_key.startswith("quarantine/")
+    finally:
+        app.config["SETTINGS"].malware_scan_required = False
+
+
+def test_infected_scan_keeps_the_document_quarantined(db, org, scope, app):
+    app.config["SETTINGS"].malware_scan_required = True
+    try:
+        document = _upload(db, org, PDF, "suspect.pdf", declared="application/pdf")
+        db.session.commit()
+
+        documents.record_scan_result(db.session, document=document, clean=False, detail="EICAR")
+        db.session.commit()
+
+        assert document.scan_status == ScanStatus.INFECTED
+        assert document.is_quarantined
+        assert not document.is_servable
+        assert document.storage_key.startswith("quarantine/")
+    finally:
+        app.config["SETTINGS"].malware_scan_required = False
+
+
+def test_structural_scanner_catches_the_eicar_test_file():
+    result = StructuralScanner().scan(io.BytesIO(EICAR))
+    assert not result.clean
+    assert "EICAR" in (result.detail or "")
+
+
+def test_structural_scanner_flags_active_content():
+    pdf_with_js = PDF + b"\n/JavaScript (app.alert('x'))\n"
+    result = StructuralScanner().scan(io.BytesIO(pdf_with_js))
+    assert not result.clean
+
+
+def test_structural_scanner_passes_an_ordinary_document():
+    assert StructuralScanner().scan(io.BytesIO(PDF)).clean
+
+
+# ------------------------------------------------------------- link graph
+
+
+def test_one_document_links_to_many_entities(db, org, scope, lease_record, property_record):
+    """The differentiating design: one object, many relationships."""
+    document = _upload(db, org, PDF, "coi.pdf", declared="application/pdf")
+    documents.link_document(
+        db.session, document=document, entity_type="lease", entity_id=lease_record.id
+    )
+    documents.link_document(
+        db.session,
+        document=document,
+        entity_type="property",
+        entity_id=property_record.id,
+        relation="evidence",
+    )
+    db.session.commit()
+
+    from_lease = documents.documents_for(
+        db.session, org_id=org.id, entity_type="lease", entity_id=lease_record.id
+    )
+    from_property = documents.documents_for(
+        db.session, org_id=org.id, entity_type="property", entity_id=property_record.id
+    )
+
+    assert [d.id for d in from_lease] == [document.id]
+    assert [d.id for d in from_property] == [document.id]
+    assert db.session.query(Document).count() == 1
+
+
+def test_linking_is_idempotent(db, org, scope, lease_record):
+    document = _upload(db, org, PDF, "dup.pdf", declared="application/pdf")
+    first = documents.link_document(
+        db.session, document=document, entity_type="lease", entity_id=lease_record.id
+    )
+    second = documents.link_document(
+        db.session, document=document, entity_type="lease", entity_id=lease_record.id
+    )
+    db.session.commit()
+    assert first.id == second.id
+
+
+# ---------------------------------------------------------- signed access
+
+
+def test_signed_token_round_trips(db, org, scope):
+    document = _upload(db, org, PDF, "signed.pdf", declared="application/pdf")
+    db.session.commit()
+
+    token = documents.sign_document_token(document)
+    resolved = documents.resolve_signed_token(db.session, token)
+    assert resolved.id == document.id
+
+
+def test_tampered_token_is_rejected(db, org, scope):
+    from app.errors import NotFound
+
+    document = _upload(db, org, PDF, "tamper.pdf", declared="application/pdf")
+    db.session.commit()
+
+    token = documents.sign_document_token(document)
+    with pytest.raises(NotFound):
+        documents.resolve_signed_token(db.session, token[:-4] + "AAAA")
+
+
+def test_expired_token_is_rejected(db, org, scope, app):
+    document = _upload(db, org, PDF, "expiry.pdf", declared="application/pdf")
+    db.session.commit()
+    token = documents.sign_document_token(document)
+
+    original = app.config["SETTINGS"].signed_url_ttl_seconds
+    app.config["SETTINGS"].signed_url_ttl_seconds = -1
+    try:
+        with pytest.raises(ValidationFailed, match="expired"):
+            documents.resolve_signed_token(db.session, token)
+    finally:
+        app.config["SETTINGS"].signed_url_ttl_seconds = original
+
+
+def test_download_records_an_audit_event(db, org, scope):
+    from app.models.audit import AuditEvent
+
+    document = _upload(db, org, PDF, "audited.pdf", declared="application/pdf")
+    db.session.commit()
+
+    documents.open_document(db.session, document=document)
+    db.session.commit()
+
+    downloads = (
+        db.session.query(AuditEvent).filter(AuditEvent.action == "document.downloaded").count()
+    )
+    assert downloads == 1
+    assert document.download_count == 1
+
+
+# -------------------------------------------------------------- retention
+
+
+def test_legal_hold_survives_retention_expiry(db, org, scope):
+    """A hold outranks every retention rule. This is the one that matters."""
+    import datetime as dt
+
+    document = _upload(db, org, PDF, "held.pdf", declared="application/pdf")
+    document.retention_until = dt.date.today() - dt.timedelta(days=1)
+    document.legal_hold = True
+    db.session.commit()
+
+    assert not document.is_purgeable
+    assert documents.purge_expired_documents(db.session, org_id=org.id) == 0
+    assert not document.is_deleted
+
+
+def test_expired_documents_are_purged(db, org, scope):
+    import datetime as dt
+
+    document = _upload(db, org, PDF, "stale.pdf", declared="application/pdf")
+    document.retention_until = dt.date.today() - dt.timedelta(days=1)
+    db.session.commit()
+
+    assert documents.purge_expired_documents(db.session, org_id=org.id) == 1
+    db.session.commit()
+    assert document.is_deleted
+
+
+# -------------------------------------------------------------------- API
+
+
+def test_api_upload_and_download_round_trip(client, org, make_user, sign_in):
+    make_user("org_admin", email="uploader@test.local")
+    sign_in("uploader@test.local")
+
+    created = client.post(
+        "/api/v1/documents",
+        data={
+            "file": (io.BytesIO(PDF), "lease.pdf", "application/pdf"),
+            "category": "lease",
+        },
+        content_type="multipart/form-data",
+    )
+    assert created.status_code == 201, created.get_json()
+    document_id = created.get_json()["id"]
+
+    url = client.post(f"/api/v1/documents/{document_id}/download-url")
+    assert url.status_code == 200
+    downloaded = client.get(url.get_json()["url"])
+
+    assert downloaded.status_code == 200
+    assert downloaded.data == PDF
+    assert "no-store" in downloaded.headers["Cache-Control"]
+    assert downloaded.headers["X-Content-Type-Options"] == "nosniff"
+
+
+def test_api_rejects_a_disguised_executable(client, org, make_user, sign_in):
+    make_user("org_admin", email="attacker@test.local")
+    sign_in("attacker@test.local")
+
+    response = client.post(
+        "/api/v1/documents",
+        data={"file": (io.BytesIO(b"MZ\x90\x00\x03"), "invoice.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 422
+    assert response.get_json()["error"]["code"] == "validation_failed"
+
+
+def test_api_download_requires_a_valid_token(client, org, make_user, sign_in):
+    make_user("org_admin", email="tokenless@test.local")
+    sign_in("tokenless@test.local")
+    assert client.get("/api/v1/documents/download/not-a-real-token").status_code == 404

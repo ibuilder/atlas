@@ -36,6 +36,10 @@ PUBLIC_ENDPOINTS: frozenset[str] = frozenset(
         "api_v1.auth_password_reset_request",
         "api_v1.auth_password_reset_complete",
         "api_v1.meta_index",
+        # Authenticated by a signed, expiring token rather than by session, so a
+        # retrieval link can be emailed. The token carries the organization it
+        # was minted for, and a quarantined document is refused regardless.
+        "api_v1.documents_download",
     }
 )
 
@@ -113,6 +117,7 @@ def _register_routes() -> None:
     from app.api.v1.routes import (  # noqa: F401
         accounting,
         auth,
+        documents,
         leasing,
         maintenance,
         meta,

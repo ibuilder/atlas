@@ -145,9 +145,7 @@ def tables_missing_policies(connection: Any) -> list[str]:
     if connection.dialect.name != "postgresql":
         return []
 
-    rows = connection.execute(
-        text(
-            """
+    rows = connection.execute(text("""
             SELECT c.relname
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -162,7 +160,5 @@ def tables_missing_policies(connection: Any) -> list[str]:
                         WHERE p.polrelid = c.oid AND p.polname = 'atlas_tenant_isolation'
                     )
               )
-            """
-        )
-    )
+            """))
     return sorted({row[0] for row in rows} - RLS_EXEMPT_TABLES)

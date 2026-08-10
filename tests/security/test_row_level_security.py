@@ -47,16 +47,12 @@ def rls_enabled(pg):
     yield pg
     with pg.engine.begin() as connection:
         for table in tenant_tables():
-            connection.execute(
-                text(f"ALTER TABLE {table.name} DISABLE ROW LEVEL SECURITY")
-            )
+            connection.execute(text(f"ALTER TABLE {table.name} DISABLE ROW LEVEL SECURITY"))
 
 
 class _scoped:
     def __init__(self, org_id: str | None) -> None:
-        self.ctx = RequestContext(
-            correlation_id=new_correlation_id(), org_id=org_id, source="test"
-        )
+        self.ctx = RequestContext(correlation_id=new_correlation_id(), org_id=org_id, source="test")
         self.token = None
 
     def __enter__(self):
@@ -111,9 +107,7 @@ def test_raw_sql_cannot_read_another_tenant(rls_enabled, org, other_org):
     rls_enabled.session.expunge_all()
 
     with _scoped(org.id):
-        rows = rls_enabled.session.execute(
-            text("SELECT code FROM properties")
-        ).scalars().all()
+        rows = rls_enabled.session.execute(text("SELECT code FROM properties")).scalars().all()
         assert set(rows) == {"MINE"}
 
         # Even addressing the row by primary key returns nothing.
@@ -130,9 +124,7 @@ def test_raw_aggregate_cannot_count_another_tenant(rls_enabled, org, other_org):
     rls_enabled.session.expunge_all()
 
     with _scoped(org.id):
-        count = rls_enabled.session.execute(
-            text("SELECT count(*) FROM properties")
-        ).scalar_one()
+        count = rls_enabled.session.execute(text("SELECT count(*) FROM properties")).scalar_one()
     assert count == 1
 
 
