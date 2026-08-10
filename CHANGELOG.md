@@ -12,6 +12,31 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Asset lifecycle** (roadmap 5.1). Warranty is resolved when work is
+  *recorded* rather than discovered later on an invoice, so "we paid for
+  something that was covered" is visible in the data instead of merely
+  regrettable - and a paid repair can still be identified as recoverable
+  afterwards, which is when the discovery usually happens. The asset's
+  aggregates are derived from its service history rather than maintained
+  alongside it, so they cannot drift; an event arriving out of order does not
+  drag the last-serviced date backwards. Retirement keeps the history, because
+  it is the evidence behind the next replacement decision.
+- **Repair-or-replace advice.** Cumulative repair cost against replacement
+  cost, repeat failures within twelve months, expected life, and last recorded
+  condition. One signal is "assess", two are "replace" - and preventive visits
+  are not counted as failures, or a well-maintained boiler would look like a
+  liability. The recommendation matters less than the three numbers returned
+  with it, which turn "it keeps breaking" into something a budget meeting can
+  act on.
+- **Capital planning** (roadmap 5.2). A multi-year forecast that starts from
+  expected life and then moves on observed condition and failure history,
+  reporting which inputs it actually had. A missing replacement cost is stated
+  rather than silently contributing zero to a budget somebody commits to.
+  Costs inflate forward at a rate that is an argument rather than a constant.
+  Assets beyond the horizon are dropped rather than piled into the final year,
+  which would show a cliff that is not there. Exposed as a `capital_plan`
+  report.
+
 - **Role administration console** (roadmap 4.7). Roles with their permissions
   and holders, and the reverse view - "what can this person do?" is the
   question actually asked. Read-only by design: granting a role from a list is

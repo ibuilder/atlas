@@ -114,7 +114,9 @@ feature list is how a buyer discovers the gap during implementation.
 | Signed expiring retrieval | **Complete** | Time-limited tokens, attributable to the actor they were issued to, refused for quarantined objects. |
 | Retention and legal hold | **Complete** | Retention derived from document category; a hold outranks every rule. |
 | OCR and extraction | **Seam** | Fields and status modelled; no pipeline. |
-| Asset registry, warranties, service history | **Modelled** | Includes warranty lookup and replacement forecasting logic on the model. |
+| Asset registry, warranties, service history | **Complete** | Warranty is resolved when work is *recorded*, not discovered on an invoice, so paying for covered work is visible in the data. The asset's aggregates are derived from its service history rather than maintained separately, so they cannot drift from it. Retirement keeps the history, because it is the evidence behind the next replacement decision. |
+| Repair-or-replace advice | **Complete** | Computed from cumulative repair cost against replacement cost, repeat failures in twelve months, expected life, and last recorded condition. One signal is "assess"; two are "replace". The recommendation matters less than the numbers behind it, which are returned with it. |
+| Capital planning | **Complete** | Multi-year replacement forecast that starts from expected life and then *moves* on observed condition and failure history, and reports which it used. A missing replacement cost is stated rather than contributing zero to a budget. Costs inflate forward at a stated rate. Assets beyond the horizon are dropped rather than piled into the final year, which would show a cliff that is not there. Available as a report. |
 
 ## Automation, reporting, integration
 

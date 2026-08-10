@@ -374,3 +374,55 @@ register(
         parameters={"as_of": None},
     )
 )
+
+
+# ---------------------------------------------------------------------------
+# Capital plan
+# ---------------------------------------------------------------------------
+
+
+def _capital_plan(session: Session, *, org_id: str, parameters: dict[str, Any]) -> list[dict]:
+    from decimal import Decimal as _Decimal
+
+    from app.services.assets.capital import DEFAULT_INFLATION, plan_as_rows, plan_capital
+
+    horizon = int(parameters.get("horizon_years") or 5)
+    raw_rate = parameters.get("inflation")
+    inflation = _Decimal(str(raw_rate)) if raw_rate is not None else DEFAULT_INFLATION
+
+    plan = plan_capital(
+        session,
+        org_id=org_id,
+        property_id=parameters.get("property_id"),
+        horizon_years=horizon,
+        inflation=inflation,
+        as_of=_as_of(parameters) if parameters.get("as_of") else None,
+    )
+    return plan_as_rows(plan)
+
+
+register(
+    ReportDefinition(
+        code="capital_plan",
+        name="Capital plan",
+        description=(
+            "Predicted asset replacements by year, inflated forward. The 'why' column "
+            "states what drove each date, and 'confidence' says where the forecast is "
+            "measured rather than merely estimated."
+        ),
+        columns=[
+            "year",
+            "asset",
+            "name",
+            "category",
+            "criticality",
+            "replace_on",
+            "base_cost",
+            "forecast_cost",
+            "confidence",
+            "why",
+        ],
+        build=_capital_plan,
+        parameters={"horizon_years": 5, "inflation": None, "property_id": None, "as_of": None},
+    )
+)

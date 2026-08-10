@@ -166,8 +166,8 @@ The strategic bet from ADR-0005, built once the operational chain is complete.
 
 | # | Item | Size |
 |---|---|---|
-| 5.1 | Asset lifecycle services and warranty claim workflow | M |
-| 5.2 | Capital planning: replacement forecasting across a portfolio | M |
+| 5.1 | Asset lifecycle services and warranty claim workflow ✅ | M |
+| 5.2 | Capital planning: replacement forecasting across a portfolio ✅ | M |
 | 5.3 | Document intelligence: OCR, lease abstraction, invoice extraction | L |
 | 5.4 | Space hierarchy and external geometry references | M |
 
