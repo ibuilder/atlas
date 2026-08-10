@@ -45,9 +45,29 @@ def rls_enabled(pg):
             for statement in policy_sql_for(table.name):
                 connection.execute(text(statement))
     yield pg
+    # End the test's transaction before altering the tables. ALTER TABLE needs an
+    # ACCESS EXCLUSIVE lock, and an open session transaction holds it off until
+    # the statement timeout fires.
+    pg.session.rollback()
+    pg.session.remove()
     with pg.engine.begin() as connection:
         for table in tenant_tables():
             connection.execute(text(f"ALTER TABLE {table.name} DISABLE ROW LEVEL SECURITY"))
+
+
+def _fresh_transaction(db) -> None:  # noqa: ANN001
+    """End any open transaction so the next query begins a new one.
+
+    The tenant variable is issued by an ``after_begin`` hook, so it belongs to
+    the transaction that was open when the scope was entered. Binding a scope
+    part-way through an existing transaction cannot retroactively set it.
+
+    That is correct behaviour rather than a limitation to work around: in a
+    request, middleware binds the context before any query runs, so the first
+    statement opens its transaction with the tenant already known. Tests have to
+    reproduce that ordering explicitly.
+    """
+    db.session.rollback()
 
 
 class _scoped:
@@ -90,6 +110,7 @@ def test_every_tenant_table_has_a_policy(rls_enabled):
 def test_session_variable_is_set_per_transaction(rls_enabled, org):
     """The tenant travels as transaction-local state, not connection state."""
     with _scoped(org.id):
+        _fresh_transaction(rls_enabled)
         value = rls_enabled.session.execute(
             text(f"SELECT current_setting('{ORG_SETTING}', true)")
         ).scalar_one()
@@ -107,6 +128,7 @@ def test_raw_sql_cannot_read_another_tenant(rls_enabled, org, other_org):
     rls_enabled.session.expunge_all()
 
     with _scoped(org.id):
+        _fresh_transaction(rls_enabled)
         rows = rls_enabled.session.execute(text("SELECT code FROM properties")).scalars().all()
         assert set(rows) == {"MINE"}
 
@@ -124,6 +146,7 @@ def test_raw_aggregate_cannot_count_another_tenant(rls_enabled, org, other_org):
     rls_enabled.session.expunge_all()
 
     with _scoped(org.id):
+        _fresh_transaction(rls_enabled)
         count = rls_enabled.session.execute(text("SELECT count(*) FROM properties")).scalar_one()
     assert count == 1
 
@@ -132,6 +155,7 @@ def test_write_check_refuses_a_foreign_org_id(rls_enabled, org, other_org):
     """``WITH CHECK`` stops a write *into* another tenant, not just reads from it."""
     from sqlalchemy.exc import ProgrammingError
 
+    _fresh_transaction(rls_enabled)
     with _scoped(org.id), pytest.raises((ProgrammingError, Exception)) as exc:
         rls_enabled.session.execute(
             text(
