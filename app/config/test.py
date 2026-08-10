@@ -35,7 +35,9 @@ class TestSettings(Settings):
     celery_task_always_eager: bool = True
     log_level: str = "WARNING"  # type: ignore[assignment]
     log_format: str = "console"  # type: ignore[assignment]
-    db_enable_rls: bool = False
+    # Enabled so the row-level-security tests exercise the real session binding.
+    # The hook is a no-op on SQLite, so the portable path is unaffected.
+    db_enable_rls: bool = True
     malware_scan_required: bool = False
     metrics_enabled: bool = False
     mail_backend: str = "memory"  # type: ignore[assignment]

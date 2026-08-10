@@ -40,9 +40,21 @@ Atlas fails closed at startup, but it cannot enforce the environment around it.
   backdoor, by design.
 - Set `METRICS_TOKEN`. `/metrics` exposes tenant counts and revenue-shaped
   counters.
-- Enable PostgreSQL row-level security (`DB_ENABLE_RLS=true`) and run the
-  application as a role that is subject to it — not as the table owner, which
-  bypasses RLS.
+- Enable PostgreSQL row-level security (`DB_ENABLE_RLS=true`) **and connect as a
+  role that is actually subject to it.** This is the single easiest way to
+  deploy Atlas with RLS enabled, looking correct, and doing nothing:
+  - A **superuser bypasses every policy unconditionally**, and `FORCE ROW LEVEL
+    SECURITY` does not change that. The default user created by the official
+    `postgres` image is a superuser.
+  - A **table owner** bypasses policies unless `FORCE` is set. Atlas sets it, so
+    ownership alone is survivable — but a superuser is not.
+  - Create a dedicated `NOBYPASSRLS` role for the application, grant it only
+    `SELECT, INSERT, UPDATE, DELETE` on the schema, and run migrations as a
+    separate, more privileged role.
+
+  Verify it rather than assuming: connect as the application role and run
+  `SELECT count(*) FROM properties` with no tenant variable set. It must return
+  zero.
 - Restrict database network access. Isolation layers 1 and 2 live in the
   application; only RLS protects against a direct connection.
 - Back up and **test restoring**. An untested backup is a hypothesis.
@@ -51,9 +63,6 @@ Atlas fails closed at startup, but it cannot enforce the environment around it.
 
 Stated plainly rather than left to be discovered:
 
-- **PostgreSQL RLS policies are not yet in a migration.** The design assumes
-  three isolation layers; two are implemented and tested. Treat the database
-  network boundary as load-bearing until the RLS migration lands.
 - **No SSO.** `idp_issuer` and `idp_subject` exist on `User`; no protocol
   implementation. Enterprise deployments needing SAML or OIDC should wait.
 - **Document upload is not implemented.** Malware scanning and quarantine are

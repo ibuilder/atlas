@@ -1,12 +1,12 @@
-"""Row-level security: the third isolation layer.
+﻿"""Row-level security: the third isolation layer.
 
-PostgreSQL only. Skipped on SQLite, which has no equivalent — and the skip is
+PostgreSQL only. Skipped on SQLite, which has no equivalent â€” and the skip is
 loud rather than silent, because "these tests passed" must never mean "these
 tests did not run".
 
 The interesting assertion is the last one: a **raw SQL** query, bypassing the
 ORM entirely, still cannot see another tenant's rows. That is the whole point of
-this layer — layers one and two only protect paths that go through them.
+this layer â€” layers one and two only protect paths that go through them.
 
 SPDX-License-Identifier: MIT
 """
@@ -44,6 +44,29 @@ def rls_enabled(pg):
         for table in tenant_tables():
             for statement in policy_sql_for(table.name):
                 connection.execute(text(statement))
+
+        # A superuser bypasses row-level security unconditionally, and FORCE
+        # does not change that. The CI database user is a superuser, so without
+        # a dedicated unprivileged role these tests would pass while proving
+        # nothing. This mirrors the deployment requirement in SECURITY.md.
+        connection.execute(text("""
+                DO $$ BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'atlas_app') THEN
+                        CREATE ROLE atlas_app NOLOGIN NOBYPASSRLS;
+                    END IF;
+                END $$;
+                """))
+        connection.execute(text("GRANT USAGE ON SCHEMA public TO atlas_app"))
+        connection.execute(
+            text(
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES "
+                "IN SCHEMA public TO atlas_app"
+            )
+        )
+        connection.execute(
+            text("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO atlas_app")
+        )
+
     yield pg
     # End the test's transaction before altering the tables. ALTER TABLE needs an
     # ACCESS EXCLUSIVE lock, and an open session transaction holds it off until
@@ -68,6 +91,19 @@ def _fresh_transaction(db) -> None:  # noqa: ANN001
     reproduce that ordering explicitly.
     """
     db.session.rollback()
+
+
+def _as_app_role(db) -> None:  # noqa: ANN001
+    """Start a fresh transaction as the unprivileged application role.
+
+    Both halves matter. The rollback ensures the tenant variable is issued for
+    the transaction the query will actually run in; ``SET ROLE`` drops the
+    superuser privilege that would otherwise bypass every policy.
+    """
+    _fresh_transaction(db)
+    # LOCAL, so the role reverts with the transaction. A bare SET ROLE persists
+    # on the pooled connection and would silently follow into the next test.
+    db.session.execute(text("SET LOCAL ROLE atlas_app"))
 
 
 class _scoped:
@@ -110,7 +146,7 @@ def test_every_tenant_table_has_a_policy(rls_enabled):
 def test_session_variable_is_set_per_transaction(rls_enabled, org):
     """The tenant travels as transaction-local state, not connection state."""
     with _scoped(org.id):
-        _fresh_transaction(rls_enabled)
+        _as_app_role(rls_enabled)
         value = rls_enabled.session.execute(
             text(f"SELECT current_setting('{ORG_SETTING}', true)")
         ).scalar_one()
@@ -128,7 +164,7 @@ def test_raw_sql_cannot_read_another_tenant(rls_enabled, org, other_org):
     rls_enabled.session.expunge_all()
 
     with _scoped(org.id):
-        _fresh_transaction(rls_enabled)
+        _as_app_role(rls_enabled)
         rows = rls_enabled.session.execute(text("SELECT code FROM properties")).scalars().all()
         assert set(rows) == {"MINE"}
 
@@ -146,7 +182,7 @@ def test_raw_aggregate_cannot_count_another_tenant(rls_enabled, org, other_org):
     rls_enabled.session.expunge_all()
 
     with _scoped(org.id):
-        _fresh_transaction(rls_enabled)
+        _as_app_role(rls_enabled)
         count = rls_enabled.session.execute(text("SELECT count(*) FROM properties")).scalar_one()
     assert count == 1
 
@@ -155,7 +191,7 @@ def test_write_check_refuses_a_foreign_org_id(rls_enabled, org, other_org):
     """``WITH CHECK`` stops a write *into* another tenant, not just reads from it."""
     from sqlalchemy.exc import ProgrammingError
 
-    _fresh_transaction(rls_enabled)
+    _as_app_role(rls_enabled)
     with _scoped(org.id), pytest.raises((ProgrammingError, Exception)) as exc:
         rls_enabled.session.execute(
             text(
