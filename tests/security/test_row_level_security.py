@@ -191,20 +191,25 @@ def test_write_check_refuses_a_foreign_org_id(rls_enabled, org, other_org):
     """``WITH CHECK`` stops a write *into* another tenant, not just reads from it."""
     from sqlalchemy.exc import ProgrammingError
 
-    _as_app_role(rls_enabled)
-    with _scoped(org.id), pytest.raises((ProgrammingError, Exception)) as exc:
-        rls_enabled.session.execute(
-            text(
-                "INSERT INTO properties "
-                "(id, org_id, code, name, property_type, status, address_line1, city, "
-                " region, postal_code, country, total_units, settings, attributes, "
-                " created_at, updated_at) "
-                "VALUES (gen_random_uuid(), :org, 'HACK', 'Smuggled', 'residential_multi', "
-                "'active', '1 X', 'Y', 'Z', '00001', 'US', 0, '{}', '{}', now(), now())"
-            ),
-            {"org": other_org.id},
-        )
-        rls_enabled.session.flush()
+    # The role must be assumed *inside* the tenant scope: the transaction it
+    # starts is the one that carries the tenant variable, and starting it first
+    # would run the insert with the bypass set.
+    with _scoped(org.id):
+        _as_app_role(rls_enabled)
+        with pytest.raises((ProgrammingError, Exception)) as exc:
+            rls_enabled.session.execute(
+                text(
+                    "INSERT INTO properties "
+                    "(id, org_id, code, name, property_type, status, address_line1, city, "
+                    " region, postal_code, country, total_units, settings, attributes, "
+                    " created_at, updated_at) "
+                    "VALUES (gen_random_uuid(), :org, 'HACK', 'Smuggled', "
+                    "'residential_multi', 'active', '1 X', 'Y', 'Z', '00001', 'US', 0, "
+                    "'{}', '{}', now(), now())"
+                ),
+                {"org": other_org.id},
+            )
+            rls_enabled.session.flush()
 
     assert "policy" in str(exc.value).lower() or "row-level security" in str(exc.value).lower()
     rls_enabled.session.rollback()
@@ -228,6 +233,7 @@ def test_bypass_is_scoped_to_the_transaction(rls_enabled, org, other_org):
     # bypass had been set at connection level rather than SET LOCAL, this would
     # still see everything.
     with _scoped(org.id):
+        _as_app_role(rls_enabled)
         scoped_count = rls_enabled.session.execute(
             text("SELECT count(*) FROM properties")
         ).scalar_one()
