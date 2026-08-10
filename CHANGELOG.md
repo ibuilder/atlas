@@ -12,6 +12,31 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Space hierarchy** (roadmap 5.4). Site, building, floor, unit, room, riser -
+  assembled in one query rather than one round trip per node, because the page
+  that shows a two-hundred-room building is the page people leave open all day.
+  Answers "what does this serve?", and rolls area and equipment upward. Two
+  invariants are enforced rather than assumed: a space cannot become its own
+  ancestor, and cannot move to another property. The first would turn every
+  traversal into an infinite loop from a single mis-set parent - exactly the
+  edit a bulk import makes - and the second would make every roll-up above it
+  wrong in a way nobody notices until a cost report is questioned. External
+  geometry references are stored opaquely, because interpreting an IFC GUID
+  belongs to the system that produced it.
+- **Document intelligence** (roadmap 5.3), in the shape ADR-0006 requires.
+  Lease, invoice, and insurance-certificate extraction produce *suggestions*,
+  never facts. Nothing reaches a lease or the ledger until a person accepts it,
+  and the accept is attributed and audited alongside the sentence the value was
+  read from - so "why does it say £3,100?" answers with a name and a quote
+  rather than a shrug. A reviewer can correct a misread digit rather than only
+  accept or reject, which is the common case. A missing field is reported
+  rather than omitted, and a weak label like a bare "total" - which matches
+  subtotal and tax too - gets a confidence that forces a look. An ambiguous
+  date such as 12/04/2026 keeps its reading but drops below the review
+  threshold instead of silently booking a payment a month out. The extractors
+  are deterministic matchers and say so; a model-backed one would slot in
+  behind the same interface and be bound by the same rule.
+
 - **Asset lifecycle** (roadmap 5.1). Warranty is resolved when work is
   *recorded* rather than discovered later on an invoice, so "we paid for
   something that was covered" is visible in the data instead of merely

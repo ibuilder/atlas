@@ -160,7 +160,7 @@ stale projection is a rebuild rather than a correctness problem.
 
 ---
 
-## 0.5.0 — Asset intelligence
+## 0.5.0 — Asset intelligence ✅ *shipped*
 
 The strategic bet from ADR-0005, built once the operational chain is complete.
 
@@ -168,8 +168,8 @@ The strategic bet from ADR-0005, built once the operational chain is complete.
 |---|---|---|
 | 5.1 | Asset lifecycle services and warranty claim workflow ✅ | M |
 | 5.2 | Capital planning: replacement forecasting across a portfolio ✅ | M |
-| 5.3 | Document intelligence: OCR, lease abstraction, invoice extraction | L |
-| 5.4 | Space hierarchy and external geometry references | M |
+| 5.3 | Document intelligence: OCR, lease abstraction, invoice extraction ✅ | L |
+| 5.4 | Space hierarchy and external geometry references ✅ | M |
 
 **5.3** is where AI first becomes defensible: extraction is a *suggestion* against
 a document a human can check, which is the shape ADR-0006 requires.
