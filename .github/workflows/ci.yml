@@ -46,7 +46,7 @@ jobs:
         run: black --check app tests wsgi.py
 
       - name: Lint
-        run: ruff check app tests --output-format github
+        run: ruff check app tests migrations --output-format github
 
       - name: Type check
         run: mypy app

@@ -38,11 +38,11 @@ test-fast: ## Run the test suite without coverage
 	$(BIN)/python -m pytest -q
 
 lint: ## Check formatting and lint rules
-	$(BIN)/python -m ruff check app tests
+	$(BIN)/python -m ruff check app tests migrations
 	$(BIN)/python -m black --check app tests wsgi.py
 
 format: ## Apply formatting and safe lint fixes
-	$(BIN)/python -m ruff check app tests --fix
+	$(BIN)/python -m ruff check app tests migrations --fix
 	$(BIN)/python -m black app tests wsgi.py
 
 typecheck: ## Static type analysis

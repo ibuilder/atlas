@@ -45,8 +45,11 @@ def apply_tenant_policies() -> None:
     if op.get_bind().dialect.name != "postgresql":
         return
 
+    # The only interpolated value is EXEMPT, a module-level tuple of literal
+    # table names. Nothing here is caller-supplied, and the identifiers inside
+    # the DO block go through quote_ident.
     exempt = ", ".join(f"'{name}'" for name in EXEMPT)
-    op.execute(f"""
+    statement = f"""
 DO $$
 DECLARE
     target text;
@@ -73,4 +76,5 @@ BEGIN
     END LOOP;
 END
 $$;
-""")
+"""  # noqa: S608 - see the note above; nothing here is caller-supplied
+    op.execute(statement)

@@ -10,6 +10,18 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ## [Unreleased]
 
+### Fixed
+
+- The single-sign-on migration was hand-written and did not match what the
+  models declare: it missed `delete_reason` from the soft-delete mixin, used a
+  plain `String` where the models use the portable enum type, omitted the
+  mixin-supplied indexes, and set `ON DELETE CASCADE` where the tenant
+  convention is `RESTRICT`. `alembic check` caught it in CI. Regenerated from
+  the models, which is what should have happened the first time.
+- `ruff` now lints `migrations/` as well as `app/` and `tests/`. Migrations are
+  code that runs against production databases, and leaving them outside the
+  lint gate is how a hand-written one drifts from the schema unnoticed.
+
 ### Added
 
 - Disaster-recovery runbook, and the command it depends on:

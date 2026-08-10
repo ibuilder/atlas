@@ -66,9 +66,7 @@ def render_item(type_, obj, autogen_context):  # noqa: ANN001, ANN201
 
 def include_object(obj, name, type_, reflected, compare_to):  # noqa: ANN001, ANN201
     """Skip objects Alembic should not manage."""
-    if type_ == "table" and name in {"alembic_version"}:
-        return False
-    return True
+    return not (type_ == "table" and name in {"alembic_version"})
 
 
 def run_migrations_offline() -> None:
