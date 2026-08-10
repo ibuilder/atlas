@@ -90,7 +90,7 @@ def test_storage_key_never_contains_the_filename():
     """Keys built from user input leak resident names and invite traversal."""
     key = build_storage_key(tenant_prefix="org/acme", extension=".pdf")
     assert "lease" not in key
-    assert key.startswith("quarantine/org/acme/")
+    assert key.startswith("org/acme/")
     assert key.endswith(".pdf")
     assert build_storage_key(tenant_prefix="org/acme", extension=".pdf") != key
 
@@ -122,12 +122,35 @@ def test_upload_stores_metadata_and_digest(db, org, scope):
 
 def test_identical_content_is_deduplicated(db, org, scope):
     """One lease PDF attached from three places is one object, not three."""
-    first = _upload(db, org, PDF, "lease.pdf", declared="application/pdf")
-    second = _upload(db, org, PDF, "lease-copy.pdf", declared="application/pdf")
+    uploader = "019fea00-0000-7000-8000-000000000001"
+    first = _upload(db, org, PDF, "lease.pdf", declared="application/pdf", uploaded_by_id=uploader)
+    second = _upload(
+        db, org, PDF, "lease-copy.pdf", declared="application/pdf", uploaded_by_id=uploader
+    )
     db.session.commit()
 
     assert first.id == second.id
     assert db.session.query(Document).count() == 1
+
+
+def test_dedup_does_not_hand_back_another_users_document(db, org, scope):
+    """Residents hold DOCUMENT_UPLOAD.
+
+    Deduplicating across uploaders would answer "upload this file" with someone
+    else's document id, name, and filename - none of which the uploader
+    supplied, and which they may have no right to read.
+    """
+    owner = "019fea00-0000-7000-8000-00000000000a"
+    stranger = "019fea00-0000-7000-8000-00000000000b"
+
+    theirs = _upload(
+        db, org, PDF, "internal-notice.pdf", declared="application/pdf", uploaded_by_id=owner
+    )
+    mine = _upload(db, org, PDF, "mine.pdf", declared="application/pdf", uploaded_by_id=stranger)
+    db.session.commit()
+
+    assert mine.id != theirs.id
+    assert mine.original_filename == "mine.pdf"
 
 
 # -------------------------------------------------------------- quarantine
@@ -142,7 +165,6 @@ def test_uploads_are_quarantined_and_unservable(db, org, scope, app):
         assert document.is_quarantined
         assert document.scan_status == ScanStatus.PENDING
         assert not document.is_servable
-        assert document.storage_key.startswith("quarantine/")
 
         with pytest.raises(BusinessRuleViolation, match="still being scanned"):
             documents.open_document(db.session, document=document)
@@ -155,6 +177,7 @@ def test_clean_scan_releases_the_document(db, org, scope, app):
     try:
         document = _upload(db, org, PDF, "clean.pdf", declared="application/pdf")
         db.session.commit()
+        key_before = document.storage_key
 
         documents.record_scan_result(db.session, document=document, clean=True)
         db.session.commit()
@@ -162,9 +185,10 @@ def test_clean_scan_releases_the_document(db, org, scope, app):
         assert document.scan_status == ScanStatus.CLEAN
         assert not document.is_quarantined
         assert document.is_servable
-        # Promoted out of the quarantine prefix, so the two populations stay
-        # physically separate in the bucket.
-        assert not document.storage_key.startswith("quarantine/")
+        # The key is stable for the document's lifetime: renaming across storage
+        # and the database cannot be made atomic, and quarantine is enforced by
+        # is_servable, which is derived from columns that cannot disagree.
+        assert document.storage_key == key_before
     finally:
         app.config["SETTINGS"].malware_scan_required = False
 
@@ -181,7 +205,6 @@ def test_infected_scan_keeps_the_document_quarantined(db, org, scope, app):
         assert document.scan_status == ScanStatus.INFECTED
         assert document.is_quarantined
         assert not document.is_servable
-        assert document.storage_key.startswith("quarantine/")
     finally:
         app.config["SETTINGS"].malware_scan_required = False
 
@@ -365,6 +388,41 @@ def test_api_rejects_a_disguised_executable(client, org, make_user, sign_in):
     )
     assert response.status_code == 422
     assert response.get_json()["error"]["code"] == "validation_failed"
+
+
+def test_signed_link_works_without_a_session(client, org, make_user, sign_in):
+    """Regression: the emailed-link case, which is the whole point of the feature.
+
+    A recipient has no session, so middleware binds no organization. Resolving
+    the document through a tenant-scoped lookup raised under strict tenancy and
+    turned every such request into a 404 - and the original test missed it
+    because it signed in first.
+    """
+    make_user("org_admin", email="sharer@test.local")
+    sign_in("sharer@test.local")
+
+    created = client.post(
+        "/api/v1/documents",
+        data={"file": (io.BytesIO(PDF), "shared.pdf", "application/pdf")},
+        content_type="multipart/form-data",
+    )
+    url = client.post(f"/api/v1/documents/{created.get_json()['id']}/download-url").get_json()[
+        "url"
+    ]
+
+    # Drop every cookie: this is now an anonymous request carrying only the link.
+    client.delete_cookie("atlas_session")
+    # And clear the identity map, so the lookup genuinely reaches the database.
+    # Without this the document would be served from cache and the test would
+    # pass whether or not the scoping bug was present.
+    from app.extensions import db as _db
+
+    _db.session.expunge_all()
+
+    anonymous = client.get(url)
+
+    assert anonymous.status_code == 200, anonymous.get_json()
+    assert anonymous.data == PDF
 
 
 def test_api_download_requires_a_valid_token(client, org, make_user, sign_in):

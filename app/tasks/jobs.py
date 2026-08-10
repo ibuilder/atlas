@@ -209,6 +209,7 @@ def scan_document(self, document_id: str) -> dict:  # noqa: ANN001
             return {"document_id": document_id, "status": str(document.scan_status)}
 
         with use_context(system_context("task", org_id=document.org_id)):
+            stream = None
             try:
                 stream = get_storage().get(document.storage_key)
                 result = get_scanner().scan(stream)
@@ -218,6 +219,12 @@ def scan_document(self, document_id: str) -> dict:  # noqa: ANN001
                 # The document stays quarantined while we retry. Failing open
                 # would release unscanned files whenever the scanner blinks.
                 raise self.retry(exc=exc, countdown=60) from exc
+            finally:
+                # The local backend hands back an open file handle. Left
+                # unclosed, a worker draining an upload backlog exhausts its
+                # descriptors and starts failing unrelated tasks.
+                if stream is not None and hasattr(stream, "close"):
+                    stream.close()
 
             record_scan_result(session, document=document, clean=result.clean, detail=result.detail)
             session.commit()

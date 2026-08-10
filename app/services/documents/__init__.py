@@ -4,6 +4,7 @@ SPDX-License-Identifier: MIT
 """
 
 from app.services.documents.service import (
+    delete_purged_objects,
     documents_for,
     link_document,
     open_document,
@@ -18,6 +19,7 @@ from app.services.documents.storage import ALLOWED_EXTENSIONS, get_storage
 
 __all__ = [
     "ALLOWED_EXTENSIONS",
+    "delete_purged_objects",
     "documents_for",
     "get_storage",
     "link_document",

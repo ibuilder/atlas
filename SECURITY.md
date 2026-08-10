@@ -55,6 +55,12 @@ Atlas fails closed at startup, but it cannot enforce the environment around it.
   Verify it rather than assuming: connect as the application role and run
   `SELECT count(*) FROM properties` with no tenant variable set. It must return
   zero.
+
+  The policy is suspended only for a deliberate act: an explicit `unscoped()`
+  block, or a system context that has not yet chosen a tenant (provisioning,
+  seeding, migrations). Merely having no organization bound is **not** grounds
+  for a bypass — that case is denied, so a query that forgets to establish a
+  tenant returns nothing rather than everything.
 - Restrict database network access. Isolation layers 1 and 2 live in the
   application; only RLS protects against a direct connection.
 - Back up and **test restoring**. An untested backup is a hypothesis.

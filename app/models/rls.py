@@ -78,28 +78,66 @@ def install_rls_session_binding() -> None:
     def _bind_tenant(session: Session, transaction: Any, connection: Any) -> None:
         if connection.dialect.name != "postgresql":
             return
-
-        from app.models.base import is_unscoped
-
-        org_id = current_org_id()
-
-        # No tenant scope, or an explicit unscoped block: suspend the policy.
-        # Layer two already refuses unscoped tenant queries in strict mode, so
-        # this does not widen what the application can reach - it keeps
-        # provisioning, migrations, and the audit verifier working.
-        if org_id is None or is_unscoped():
-            connection.exec_driver_sql(f"SET LOCAL {BYPASS_SETTING} = 'on'")
-            connection.exec_driver_sql(f"SET LOCAL {ORG_SETTING} = ''")
-            return
-
-        connection.exec_driver_sql(f"SET LOCAL {BYPASS_SETTING} = 'off'")
-        # Parameterised: the value reaches the database as a bind, never as
-        # interpolated SQL.
-        connection.execute(
-            text(f"SELECT set_config('{ORG_SETTING}', :org_id, true)"), {"org_id": org_id}
-        )
+        _apply(connection, current_org_id(), should_bypass())
 
     _installed = True
+
+
+def should_bypass() -> bool:
+    """Whether the policy should be suspended for the current unit of work.
+
+    Only two things earn a bypass, and both are deliberate acts:
+
+    * an explicit :func:`~app.models.base.unscoped` block, and
+    * a **system context** - provisioning, seeding, migrations, scheduled jobs -
+      created through :func:`app.context.system_context`.
+
+    Notably *not* "no organization is bound". An earlier version granted the
+    bypass whenever context was merely absent, which meant a raw ``text()``
+    query in a job that forgot to bind a tenant read every tenant's rows - the
+    exact failure this layer exists to contain. Absence of context is now a
+    denial: the policy evaluates against an empty organization and matches
+    nothing.
+    """
+    from app.context import current_context
+    from app.models.base import is_unscoped
+
+    if is_unscoped():
+        return True
+
+    ctx = current_context()
+    if ctx is None:
+        return False
+    # A system context earns the bypass only while it has no tenant bound. Once
+    # a scheduled job binds an organization to work on, it is held to it - the
+    # bypass is for the phase that legitimately spans tenants, not for the whole
+    # job.
+    return ctx.actor_type == "system" and ctx.org_id is None
+
+
+def _apply(connection: Any, org_id: str | None, bypass: bool) -> None:
+    connection.exec_driver_sql(f"SET LOCAL {BYPASS_SETTING} = '{'on' if bypass else 'off'}'")
+    # Parameterised: the value reaches the database as a bind, never as
+    # interpolated SQL.
+    connection.execute(
+        text(f"SELECT set_config('{ORG_SETTING}', :org_id, true)"), {"org_id": org_id or ""}
+    )
+
+
+def refresh_session_bindings(session: Session) -> None:
+    """Re-issue the settings for a transaction that is already open.
+
+    ``after_begin`` fires once, so entering an ``unscoped`` block part-way
+    through a transaction would otherwise change layer two's behaviour and leave
+    layer three still enforcing. Called on entry to and exit from those blocks
+    so all three layers agree at every moment.
+    """
+    bind = session.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    if not session.in_transaction():
+        return
+    _apply(session.connection(), current_org_id(), should_bypass())
 
 
 def policy_sql_for(table: str) -> list[str]:
@@ -150,7 +188,9 @@ def tables_missing_policies(connection: Any) -> list[str]:
             FROM pg_class c
             JOIN pg_namespace n ON n.oid = c.relnamespace
             JOIN information_schema.columns col
-              ON col.table_name = c.relname AND col.column_name = 'org_id'
+              ON col.table_name = c.relname
+             AND col.table_schema = n.nspname
+             AND col.column_name = 'org_id'
             WHERE n.nspname = current_schema()
               AND c.relkind = 'r'
               AND (

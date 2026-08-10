@@ -246,21 +246,47 @@ _include_deleted_depth: ContextVar[int] = ContextVar("atlas_include_deleted_dept
 class _DepthScope:
     """Re-entrant context manager toggling a scoping escape."""
 
-    __slots__ = ("_session", "_var", "_token")
+    __slots__ = ("_session", "_var", "_token", "_affects_rls")
 
-    def __init__(self, session: Session | None, var: ContextVar[int]) -> None:
+    def __init__(
+        self, session: Session | None, var: ContextVar[int], *, affects_rls: bool = False
+    ) -> None:
         self._session = session
         self._var = var
         self._token: Token[int] | None = None
+        self._affects_rls = affects_rls
 
     def __enter__(self) -> Session | None:
         self._token = self._var.set(self._var.get() + 1)
+        self._sync_rls()
         return self._session
 
     def __exit__(self, *exc: Any) -> None:
         if self._token is not None:
             self._var.reset(self._token)
             self._token = None
+        self._sync_rls()
+
+    def _sync_rls(self) -> None:
+        """Keep the database policy in step with the in-process escape.
+
+        ``after_begin`` fires once per transaction, so entering an unscoped
+        block part-way through one would relax layer two while layer three kept
+        enforcing - queries would fail for a reason nothing in the code
+        explains. Re-issuing the settings keeps all three layers agreeing.
+        """
+        if not self._affects_rls or self._session is None:
+            return
+        try:
+            from app.models.rls import refresh_session_bindings
+
+            refresh_session_bindings(self._session)
+        except Exception:  # pragma: no cover - never let scoping break a query
+            import logging
+
+            logging.getLogger("atlas.models.rls").debug(
+                "could not refresh row-level-security bindings", exc_info=True
+            )
 
 
 def unscoped(session: Session | None = None) -> _DepthScope:
@@ -269,8 +295,12 @@ def unscoped(session: Session | None = None) -> _DepthScope:
     Legitimate uses are narrow and auditable: authenticating by email before an
     organization is known, platform-operator reporting, retention jobs, and the
     audit chain verifier. Every call site should be obvious about why.
+
+    Pass the session whenever one is available: without it the escape applies to
+    the ORM guard but not to the database policy, and on PostgreSQL the query
+    will still be filtered.
     """
-    return _DepthScope(session, _unscoped_depth)
+    return _DepthScope(session, _unscoped_depth, affects_rls=True)
 
 
 def include_deleted(session: Session | None = None) -> _DepthScope:

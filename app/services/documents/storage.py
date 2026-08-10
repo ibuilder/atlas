@@ -98,7 +98,6 @@ _SIGNATURES: tuple[tuple[bytes, str], ...] = (
 _FORBIDDEN_HEADS: tuple[bytes, ...] = (
     b"<?php",
     b"#!/",
-    b"MZ",  # Windows executable
     b"\x7fELF",  # Linux executable
     b"\xca\xfe\xba\xbe",  # Mach-O / Java class
     b"<script",
@@ -140,6 +139,18 @@ def sniff_content_type(head: bytes, declared: str | None, filename: str) -> str:
     Returns the resolved type. Raises when the bytes are forbidden outright, or
     when a signature is recognised and contradicts the declared type.
     """
+    if _looks_like_dos_executable(head):
+        log.warning(
+            "upload rejected on magic bytes",
+            extra={"event": "security.upload_rejected", "reason": "dos_header"},
+        )
+        raise ValidationFailed(
+            "That file type cannot be uploaded.",
+            details=[
+                {"field": "file", "message": "The file content is not a permitted document type."}
+            ],
+        )
+
     for forbidden in _FORBIDDEN_HEADS:
         if head.startswith(forbidden):
             log.warning(
@@ -199,6 +210,24 @@ def sniff_content_type(head: bytes, declared: str | None, filename: str) -> str:
     return detected
 
 
+def _looks_like_dos_executable(head: bytes) -> bool:
+    """Whether the head is a DOS/PE header rather than text that starts "MZ".
+
+    Matching on the two bytes alone is too coarse: a CSV whose first cell is a
+    unit code like ``MZ-1``, or a resident named Mzamo, begins with exactly
+    those bytes and would be rejected with no way to tell why. A real DOS header
+    is followed by a byte count field, so byte three is not printable text, and
+    a PE additionally carries the ``PE\\0\\0`` marker further in.
+    """
+    if not head.startswith(b"MZ") or len(head) < 3:
+        return False
+    if b"PE\x00\x00" in head[:512] or b"This program cannot be run" in head[:256]:
+        return True
+    # Byte 2 of a DOS header is the low byte of "bytes on last page"; in text it
+    # would be an ordinary printable character.
+    return head[2] not in range(0x20, 0x7F)
+
+
 def _family(content_type: str) -> str:
     """Compare by family, so image/jpg and image/jpeg do not fight."""
     top, _, sub = content_type.partition("/")
@@ -250,18 +279,28 @@ def validate_filename(filename: str) -> tuple[str, str]:
     return safe, suffix
 
 
-def build_storage_key(
-    *, tenant_prefix: str, extension: str, quarantined: bool = True, at: dt.date | None = None
-) -> str:
+def build_storage_key(*, tenant_prefix: str, extension: str, at: dt.date | None = None) -> str:
     """Generate an opaque, tenant-scoped key.
 
     Date-partitioned so a bucket listing stays navigable at scale, and prefixed
     per tenant so one organization's keys can never address another's.
+
+    The key is **stable for the document's lifetime**. An earlier design wrote
+    quarantined uploads under a separate prefix and renamed them on a clean
+    scan, for physical separation. That rename cannot be made atomic with the
+    database update: if the object moves and the transaction then rolls back,
+    the row points at a key that no longer exists and the document is
+    permanently unreadable. Quarantine is enforced by ``Document.is_servable``,
+    which is checked on every retrieval path and cannot get out of step with
+    itself.
+
+    UTC, not local time: every other timestamp in the system is UTC, and a
+    worker in another timezone would otherwise file an upload received at 23:30
+    into the wrong month.
     """
-    when = at or dt.date.today()
+    when = at or dt.datetime.now(dt.UTC).date()
     prefix = tenant_prefix.strip("/") or "org/unknown"
-    root = f"{QUARANTINE_PREFIX}/" if quarantined else ""
-    return f"{root}{prefix}/{when:%Y/%m}/{uuid7_str()}{extension}"
+    return f"{prefix}/{when:%Y/%m}/{uuid7_str()}{extension}"
 
 
 def digest_and_size(stream: BinaryIO, *, max_bytes: int) -> tuple[str, int, bytes]:

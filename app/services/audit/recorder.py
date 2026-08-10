@@ -31,6 +31,7 @@ from app.models.audit import (
     AuditSeverity,
     compute_entry_hash,
 )
+from app.models.base import unscoped
 from app.models.types import utcnow
 from app.observability import AUDIT_EVENTS
 from app.services.common.unit_of_work import lock_row
@@ -97,8 +98,13 @@ def record_audit_event(
     if not isinstance(safe_payload, dict):  # pragma: no cover - defensive
         safe_payload = {"value": safe_payload}
 
-    head = _chain_head(session, org_id)
-    sequence = head.last_sequence + 1
+    # Unscoped deliberately. The recorder is a trusted writer that is always
+    # given an explicit organization, and it has to work before one is bound -
+    # a failed sign-in must still be recorded, and provisioning writes the
+    # creation event for an organization that is not yet the caller's scope.
+    with unscoped(session):
+        head = _chain_head(session, org_id)
+        sequence = head.last_sequence + 1
     previous_hash = head.last_hash or GENESIS_HASH
 
     entry_hash = compute_entry_hash(
@@ -141,8 +147,13 @@ def record_audit_event(
     head.last_hash = entry_hash
     head.last_event_at = occurred_at
 
-    session.add(event)
-    session.flush()
+    # The insert stays inside the escape too: the row-level-security policy
+    # applies WITH CHECK to writes, and an event written for an organization
+    # that is not the caller's current scope - the sign-in and provisioning
+    # cases - would otherwise be refused by the database.
+    with unscoped(session):
+        session.add(event)
+        session.flush()
 
     AUDIT_EVENTS.labels(action).inc()
     # Mirror to the SIEM pipeline. The database row is the system of record;

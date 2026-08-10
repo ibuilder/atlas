@@ -49,9 +49,18 @@ def list_documents() -> Response:
     if query.category:
         stmt = stmt.where(Document.category == query.category)
     if query.entity_type and query.entity_id:
-        stmt = stmt.join(DocumentLink, DocumentLink.document_id == Document.id).where(
-            DocumentLink.entity_type == query.entity_type.lower(),
-            DocumentLink.entity_id == query.entity_id,
+        # EXISTS rather than a join: a document may hold several relations to
+        # the same entity (an attachment and a signed copy), and a join would
+        # return it once per link - consuming page slots and corrupting the
+        # keyset cursor's has_more calculation.
+        stmt = stmt.where(
+            select(DocumentLink.id)
+            .where(
+                DocumentLink.document_id == Document.id,
+                DocumentLink.entity_type == query.entity_type.lower(),
+                DocumentLink.entity_id == query.entity_id,
+            )
+            .exists()
         )
     if query.q:
         stmt = stmt.where(Document.name.ilike(f"%{query.q}%"))

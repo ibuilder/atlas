@@ -116,16 +116,25 @@ def upload_document(
 
     # Content-addressed deduplication. The same lease PDF attached from three
     # places is one object with three links, not three objects that drift.
+    #
+    # Restricted to documents the uploader already has a claim on. Deduplicating
+    # against *any* matching document would hand back a row they may not read:
+    # residents hold DOCUMENT_UPLOAD, so uploading a file whose bytes match an
+    # internal notice would disclose that document's identity, name, and
+    # filename - none of which they supplied.
     existing = (
         session.execute(
             select(Document).where(
                 Document.org_id == org_id,
                 Document.checksum_sha256 == checksum,
                 Document.size_bytes == size,
+                Document.uploaded_by_id == uploaded_by_id,
             )
         )
         .scalars()
         .first()
+        if uploaded_by_id is not None
+        else None
     )
 
     if existing is not None:
@@ -147,9 +156,7 @@ def upload_document(
     key = build_storage_key(
         tenant_prefix=tenant_prefix or f"org/{org_id}",
         extension=extension,
-        quarantined=scan_required,
     )
-    get_storage().put(key, stream)
 
     document = Document(
         org_id=org_id,
@@ -174,7 +181,11 @@ def upload_document(
     )
     document.apply_retention()
     session.add(document)
+    # Flushed before the bytes are written. If the insert fails - a unique key
+    # collision, a foreign key violation - the object is never created, so a
+    # rolled-back upload cannot leave an unreferenced object in the bucket.
     session.flush()
+    get_storage().put(key, stream)
 
     for entity_type, entity_id, relation in links or []:
         link_document(
@@ -235,19 +246,11 @@ def record_scan_result(
         session.flush()
         return document
 
-    # Clean: promote out of the quarantine prefix so a misconfigured bucket
-    # policy on the quarantine path cannot accidentally serve it, and so the
-    # two populations stay physically separate.
-    storage = get_storage()
-    released_key = (
-        document.storage_key.split("/", 1)[1]
-        if document.storage_key.startswith("quarantine/")
-        else document.storage_key
-    )
-    if released_key != document.storage_key:
-        storage.move(document.storage_key, released_key)
-        document.storage_key = released_key
-
+    # Released by flag, not by moving the object. Renaming across storage and
+    # the database cannot be made atomic: if the move lands and the commit then
+    # fails, the row points at a key that no longer exists and the document is
+    # unreadable forever. Every retrieval path already gates on ``is_servable``,
+    # which is derived from these two columns and so cannot disagree with itself.
     document.scan_status = ScanStatus.CLEAN
     document.is_quarantined = False
     DOCUMENTS_SCANNED.labels("clean").inc()
@@ -347,7 +350,19 @@ def sign_document_token(document: Document, *, actor_id: str | None = None) -> s
 
 
 def resolve_signed_token(session: Session, token: str) -> Document:
-    """Validate a token and return its document, or raise."""
+    """Validate a token and return its document, or raise.
+
+    Resolved unscoped, deliberately. A signed link is designed to be emailed, so
+    the recipient has no session and middleware has bound no organization -
+    under strict tenancy a scoped lookup raises on every such request, breaking
+    the feature for the exact case it exists for.
+
+    The tenant check does not disappear, it moves: the organization is carried
+    inside the signed payload and compared below. The signature establishes
+    authority here, and it cannot be forged without the secret key.
+    """
+    from app.models.base import unscoped
+
     settings = current_app.config["SETTINGS"]
     try:
         payload = _serializer().loads(token, max_age=settings.signed_url_ttl_seconds)
@@ -356,7 +371,9 @@ def resolve_signed_token(session: Session, token: str) -> Document:
     except BadSignature as exc:
         raise NotFound("The requested document was not found.") from exc
 
-    document = session.get(Document, payload.get("d"))
+    with unscoped(session):
+        document = session.get(Document, payload.get("d"))
+
     if document is None or document.org_id != payload.get("o"):
         raise NotFound("The requested document was not found.")
     return document
@@ -411,12 +428,10 @@ def purge_expired_documents(session: Session, *, org_id: str, limit: int = 500) 
         .all()
     )
 
-    storage = get_storage()
     purged = 0
     for document in candidates:
         if not document.is_purgeable:
             continue
-        storage.delete(document.storage_key)
         record_audit_event(
             action=AuditAction.DOCUMENT_DELETED,
             resource_type="Document",
@@ -435,3 +450,45 @@ def purge_expired_documents(session: Session, *, org_id: str, limit: int = 500) 
 
     session.flush()
     return purged
+
+
+def delete_purged_objects(session: Session, *, org_id: str, limit: int = 500) -> int:
+    """Destroy the bytes of documents already committed as purged.
+
+    Deliberately a second pass, run after :func:`purge_expired_documents` has
+    committed. Deleting objects in the same transaction risks the worst possible
+    ordering: the bytes go, the commit then fails, and the row reverts to
+    claiming a document that no longer exists. Splitting the two makes the
+    failure mode an orphaned object - wasteful, recoverable, detectable -
+    instead of silent data loss.
+    """
+    from app.models.base import include_deleted
+
+    storage = get_storage()
+    deleted = 0
+
+    with include_deleted(session):
+        candidates = (
+            session.execute(
+                select(Document)
+                .where(
+                    Document.org_id == org_id,
+                    Document.deleted_at.is_not(None),
+                    Document.delete_reason == "retention_expired",
+                )
+                .limit(limit)
+            )
+            .scalars()
+            .all()
+        )
+
+    for document in candidates:
+        try:
+            storage.delete(document.storage_key)
+            deleted += 1
+        except Exception:  # noqa: BLE001 - one bad object must not stop the sweep
+            log.exception(
+                "failed to delete a purged object",
+                extra={"event": "document.purge_failed", "document_id": document.id},
+            )
+    return deleted
