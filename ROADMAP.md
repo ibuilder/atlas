@@ -141,7 +141,7 @@ The theme: what a 500-property operator's IT function asks for before signing.
 | 4.2 | **SAML 2.0** | M | 4.1 |
 | 4.3 | **SCIM provisioning** | M | 4.1 |
 | 4.4 | **Bulk import with replay** | M | 2.1 |
-| 4.5 | **Bank reconciliation workspace** | L | — |
+| 4.5 | **Bank reconciliation workspace** ✅ | L | — |
 | 4.6 | **Reporting projections** | M | — |
 | 4.7 | **Role administration UI** | S | — |
 

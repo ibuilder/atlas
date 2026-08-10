@@ -12,6 +12,28 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Bank reconciliation** (roadmap 4.5). Statement import is idempotent over
+  overlapping windows, which is the case that actually happens: somebody
+  downloads 1-31 March after already loading 1-15. Each line carries a stable
+  identity - the bank's reference where there is one, otherwise a fingerprint
+  of date, amount, description and an occurrence index - so two genuinely
+  identical monthly fees both survive while a re-import of the same file adds
+  neither.
+
+  Match suggestions are ranked *and explained*, because an unexplained ranking
+  is one nobody trusts and an operator who does not trust it matches everything
+  by hand anyway. Automatic matching takes only candidates that are both above
+  the confidence threshold and unambiguous: a tie between two payments of the
+  same amount on the same day is left for a person, whatever it scores. The
+  threshold is calibrated so exact amount on exact date reaches it and nothing
+  weaker does.
+
+  Completion is refused while the difference is non-zero, an exception is
+  unresolved, or a transaction is neither matched nor deliberately ignored -
+  and the unresolved check queries rather than reading an ORM collection, so it
+  cannot be defeated by a stale session. Reopening a completed reconciliation
+  demands a reason and audits as CRITICAL.
+
 - **Scheduled reports** (roadmap 3.5). A registry of five reports - rent roll,
   trial balance, delinquency ageing, work-order SLA, vendor compliance -
   rendered to CSV, JSON, HTML, PDF, or XLSX. **Recipients resolve at send
