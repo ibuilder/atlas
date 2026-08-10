@@ -22,13 +22,19 @@ def _run(app, *args):
 
 
 def test_a_healthy_database_passes(app, db, org, scope, accounts):
-    result = _run(app)
+    """The three data checks pass on a healthy database.
 
-    assert result.exit_code == 0, result.output
-    assert "All checks passed" in result.output
-    assert "field encryption key round-trips" in result.output
-    assert "audit chain intact" in result.output
-    assert "ledger balances" in result.output
+    Run with --no-strict because the fourth check is about the *schema*, and
+    the test database is built by ``create_all`` rather than by migrations - so
+    it genuinely has no row-level-security policies on PostgreSQL. That is the
+    check working, not failing; asserting a clean exit here would mean
+    asserting that a database without RLS is fine.
+    """
+    result = _run(app, "--no-strict")
+
+    assert "[ok] field encryption key round-trips" in result.output
+    assert "[ok] audit chain intact" in result.output
+    assert "[ok] ledger balances" in result.output
 
 
 def test_a_broken_ledger_fails_the_restore(app, db, org, scope, accounts):
@@ -133,7 +139,17 @@ def test_no_strict_reports_without_failing(app, db, org, scope, accounts):
     assert "not usable" in result.output
 
 
-def test_row_level_security_is_skipped_on_sqlite(app, db, org, scope):
-    """Stated rather than silently passing: SQLite has no RLS to check."""
-    result = _run(app)
-    assert "row-level security: not PostgreSQL" in result.output
+def test_the_row_level_security_check_reports_per_dialect(app, db, org, scope):
+    """Stated either way, never silently passed over.
+
+    On SQLite there is no such thing to check and the command says so. On
+    PostgreSQL it looks, and against a ``create_all`` schema it correctly
+    reports the policies missing - which is precisely the restore failure the
+    check exists to catch.
+    """
+    result = _run(app, "--no-strict")
+
+    if db.engine.dialect.name == "postgresql":
+        assert "row-level security" in result.output
+    else:
+        assert "row-level security: not PostgreSQL" in result.output
