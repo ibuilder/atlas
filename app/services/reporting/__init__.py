@@ -3,6 +3,15 @@
 SPDX-License-Identifier: MIT
 """
 
+from app.services.reporting.projections import (
+    METRICS,
+    MetricDefinition,
+    MetricValue,
+    known_metrics,
+    rebuild_series,
+    roll_up,
+    snapshot_metrics,
+)
 from app.services.reporting.registry import (
     REPORTS,
     ReportDefinition,
@@ -22,7 +31,14 @@ from app.services.reporting.service import (
 )
 
 __all__ = [
+    "METRICS",
+    "MetricDefinition",
+    "MetricValue",
     "REPORTS",
+    "known_metrics",
+    "rebuild_series",
+    "roll_up",
+    "snapshot_metrics",
     "Recipient",
     "RenderedReport",
     "ReportDefinition",

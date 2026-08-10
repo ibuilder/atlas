@@ -12,6 +12,16 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **KPI projections** (roadmap 4.6). Five metrics - occupancy, delinquency, SLA
+  compliance, open work orders, net operating income - computed nightly into
+  `KpiSnapshot` so dashboards stop contending with operational writes. Two
+  properties hold: every metric is a pure function of operational data for a
+  given date, so a doubtful series is a rebuild rather than a correctness
+  problem; and every rate stores its numerator and denominator, so a portfolio
+  roll-up re-divides instead of averaging percentages. Two properties at 100%
+  and 50% occupancy are not 75% occupied unless they are the same size, and
+  that is the reason those columns exist.
+
 - **Bank reconciliation** (roadmap 4.5). Statement import is idempotent over
   overlapping windows, which is the case that actually happens: somebody
   downloads 1-31 March after already loading 1-15. Each line carries a stable

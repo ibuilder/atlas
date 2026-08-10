@@ -478,3 +478,35 @@ def run_due_report_schedules() -> dict:
 
     JOB_RUNS.labels("run_due_report_schedules", "success").inc()
     return {"delivered": delivered, "failed": failed}
+
+
+@celery_app.task(name="atlas.reports.snapshot_kpis")
+def snapshot_kpis() -> dict:
+    """Compute yesterday's dashboard metrics.
+
+    Upserted on (metric, scope, date), so a re-run corrects the day rather than
+    adding a second point - and every metric is a pure function of operational
+    data, so a doubtful series is a rebuild and never a correctness problem.
+    """
+    import datetime as _dt
+
+    from app.services.reporting.projections import snapshot_metrics
+
+    session = _session()
+    yesterday = _dt.date.today() - _dt.timedelta(days=1)
+    points = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                points += len(snapshot_metrics(session, org_id=organization.id, as_of=yesterday))
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "kpi snapshot failed for an organization",
+                    extra={"event": "kpi.sweep_failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("snapshot_kpis", "success").inc()
+    return {"points": points, "as_of": yesterday.isoformat()}

@@ -113,6 +113,11 @@ BEAT_SCHEDULE: dict[str, dict] = {
         "task": "atlas.reports.run_due_schedules",
         "schedule": crontab(minute="*/15"),
     },
+    "snapshot-kpis": {
+        # After midnight, for the day just ended.
+        "task": "atlas.reports.snapshot_kpis",
+        "schedule": crontab(hour=0, minute=30),
+    },
     "verify-audit-chains": {
         "task": "atlas.audit.verify_chains",
         "schedule": crontab(hour=1, minute=0),

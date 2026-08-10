@@ -30,11 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.logging import get_logger
-from app.models.maintenance import (
-    PreventiveMaintenanceSchedule,
-    WorkOrder,
-    WorkOrderStatus,
-)
+from app.models.maintenance import PreventiveMaintenanceSchedule, WorkOrder
 from app.models.org import Unit
 from app.models.types import utcnow
 
@@ -247,20 +243,3 @@ def record_schedule_completion(
     schedule.last_completed_on = completed_on
     session.flush()
     return schedule
-
-
-def open_preventive_work(session: Session, *, org_id: str) -> list[WorkOrder]:
-    """Preventive work orders still outstanding."""
-    return list(
-        session.execute(
-            select(WorkOrder)
-            .where(
-                WorkOrder.org_id == org_id,
-                WorkOrder.status.not_in([WorkOrderStatus.CLOSED, WorkOrderStatus.CANCELLED]),
-                WorkOrder.deleted_at.is_(None),
-            )
-            .order_by(WorkOrder.resolution_due_at)
-        )
-        .scalars()
-        .all()
-    )
