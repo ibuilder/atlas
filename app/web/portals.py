@@ -64,14 +64,7 @@ def resident_dashboard() -> str:
     org_id = require_org_scope()
     resident_id = current_user.resident_id
 
-    lease_ids = [
-        row
-        for row in db.session.execute(
-            select(Tenancy.lease_id).where(
-                Tenancy.resident_id == resident_id, Tenancy.org_id == org_id
-            )
-        ).scalars()
-    ]
+    lease_ids = _resident_lease_ids(org_id)
 
     leases = (
         list(
@@ -127,15 +120,7 @@ def owner_dashboard() -> str:
     require(Perm.OWNER_STATEMENT_READ)
     org_id = require_org_scope()
 
-    property_ids = [
-        row
-        for row in db.session.execute(
-            select(OwnershipStake.property_id).where(
-                OwnershipStake.owner_entity_id == current_user.owner_entity_id,
-                OwnershipStake.org_id == org_id,
-            )
-        ).scalars()
-    ]
+    property_ids = _owned_property_ids(org_id)
 
     properties = (
         list(
@@ -286,6 +271,11 @@ def resident_pay_invoice(invoice_id: str) -> Response:
     raw = (request.form.get("amount") or "").strip()
     try:
         amount = quantize_money(Decimal(raw)) if raw else invoice.balance
+        # NaN survives quantization, and every ordered comparison against it
+        # raises rather than returning False - so without this the guards below
+        # would not reject the value, they would 500 on it.
+        if not amount.is_finite():
+            raise ArithmeticError("not a finite amount")
     except (ArithmeticError, ValueError):
         flash("That is not an amount.", "error")
         return redirect(url_for("resident.dashboard"))
@@ -309,6 +299,10 @@ def resident_pay_invoice(invoice_id: str) -> Response:
             lease_id=invoice.lease_id,
             property_id=invoice.property_id,
             reference=f"PORTAL-{invoice.invoice_number}",
+            # Explicit, because the default retires the lease's open invoices
+            # oldest-first. A resident who picked this invoice would otherwise
+            # have paid a different one and been told they had not.
+            allocations=[(invoice.id, amount)],
             actor_id=current_user.id,
         )
         db.session.commit()
@@ -400,14 +394,21 @@ def owner_statements() -> str:
         ).scalars()
     )
 
-    properties = {
-        record.id: record
-        for record in db.session.execute(
-            select(Property).where(
-                Property.id.in_([statement.property_id for statement in statements] or [""])
-            )
-        ).scalars()
-    }
+    # Guard the empty case by not running the query. Substituting a sentinel
+    # id binds it through the GUID type, which validates identifiers and
+    # rejects anything that is not one - so an owner with no statements yet
+    # would get a 500 rather than an empty page.
+    property_ids = {statement.property_id for statement in statements if statement.property_id}
+    properties = (
+        {
+            record.id: record
+            for record in db.session.execute(
+                select(Property).where(Property.id.in_(list(property_ids)))
+            ).scalars()
+        }
+        if property_ids
+        else {}
+    )
 
     return render_template(
         "portals/owner_statements.html", statements=statements, properties=properties
@@ -517,6 +518,10 @@ def vendor_update_work_order(work_order_id: str) -> Response:
         try:
             labor_cost = quantize_money(Decimal(request.form.get("labor_cost") or "0"))
             material_cost = quantize_money(Decimal(request.form.get("material_cost") or "0"))
+            # See the pay route: NaN quantizes cleanly and then raises on the
+            # comparison below rather than failing it.
+            if not (labor_cost.is_finite() and material_cost.is_finite()):
+                raise ArithmeticError("not a finite amount")
         except (ArithmeticError, ValueError):
             flash("Labour and materials must be amounts.", "error")
             return redirect(url_for("vendor.dashboard"))

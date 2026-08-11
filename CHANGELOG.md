@@ -78,6 +78,49 @@ codes and the `/api/v1` namespace are already treated as stable.
 - `LeaseRenewal.rent_increase` reached for a relationship that was never
   declared, so `hasattr` was always false and it returned `None` for every
   offer ever made. The relationship now exists and the property works.
+- **The trust reconciliation's third leg was reading a field nothing wrote.**
+  `Lease.deposit_held` was set by the demo seed and by the tests, and by no
+  application code path at all — so in any real deployment the beneficiary
+  total was zero, the "book versus beneficiaries" difference was the entire
+  trust balance, and `shortfall` could never be anything but zero. The one
+  thing the module exists to catch was the one thing it could not. There is now
+  a deposit subledger (`DepositMovement`, `app/services/accounting/deposits.py`)
+  recording every collection and release against a lease *and* a named trust
+  account, posted to the ledger in the same call. Two further defects fell out
+  with it: beneficiaries were scoped by organization rather than by the account
+  being reconciled — so an operator with a trust account per jurisdiction saw a
+  phantom shortfall on one and a surplus on the other, and a genuine shortfall
+  on one was hidden when the other happened to be over by the same amount — and
+  the `as_of` argument was accepted and ignored, so a year-end tie-out run in
+  March measured the ledger at 31 December against deposits held today.
+- **A deposit disposition never released the money.** `settle_deposit` recorded
+  what was withheld and refunded on the move-out and stopped there, so the
+  trust went on reporting the deposit as owed to a resident who had been paid
+  and had left. Notice also captured `lease.security_deposit` — the contracted
+  figure — rather than what was actually collected, which refunded money that
+  was never taken.
+- **Voided disbursements counted toward 1099 totals.** A stopped cheque still
+  summed into a vendor's year, so a vendor genuinely paid $400 could cross the
+  $600 threshold on the strength of a payment that never left the bank, and be
+  issued a return overstating it.
+- **The portal paid a different invoice than the resident chose.**
+  `record_payment` retires a lease's open invoices oldest-due-first when given
+  no allocation, and the portal gave none — so a resident settling this month's
+  rent while last month's was outstanding cleared the wrong one, and the
+  confirmation told them they had cleared this one. The overpayment guard was
+  checking the balance of the invoice that was not being paid, too.
+- A `NaN` in a portal amount field returned 500 rather than a validation
+  message. It survives quantization, and Python's decimal raises on ordered
+  comparisons against it instead of returning False — so both guards that were
+  meant to reject it crashed on it instead. Affected the resident payment form
+  and the vendor cost fields.
+- An owner with no statements yet got a 500 on `/owner/statements`: the empty
+  `IN` list was guarded with a sentinel `""`, which the GUID type validates and
+  rejects. Now the query simply does not run.
+- `convert_to_lease` treated an explicit security deposit of zero as
+  unspecified and substituted a full month's rent, so a lease written with a
+  deposit-replacement rider in place of a deposit refunded a month's rent at
+  move-out.
 
 ## [0.5.0] - 2026-08-10
 

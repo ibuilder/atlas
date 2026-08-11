@@ -141,6 +141,11 @@ def generate_1099_report(
             BillPayment.org_id == org_id,
             BillPayment.paid_date >= start,
             BillPayment.paid_date <= end,
+            # A stopped cheque was never paid. Counting it overstates the
+            # return, and an overstated 1099 is one the payee disputes and the
+            # IRS holds the filer to. Neither model is soft-deletable, so this
+            # is the only exclusion there is to make.
+            BillPayment.voided_at.is_(None),
         )
     ).all()
 

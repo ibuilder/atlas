@@ -447,6 +447,44 @@ def test_an_approved_application_becomes_a_lease(db, org, scope, application):
     assert application.status == ApplicationStatus.CONVERTED
 
 
+def test_a_deposit_of_zero_is_honoured_rather_than_defaulted(db, org, scope, application):
+    """A waived deposit is an answer, not a missing one.
+
+    Treating the falsy zero as "unspecified" writes a month's rent as the
+    deposit, and move-out then refunds money the resident never paid.
+    """
+    _ready(db, application)
+    approve_application(db.session, application=application, decided_by_id=DECIDER)
+    db.session.commit()
+
+    lease = convert_to_lease(
+        db.session,
+        application=application,
+        start_date=TODAY + dt.timedelta(days=30),
+        end_date=TODAY + dt.timedelta(days=395),
+        security_deposit=Decimal("0"),
+    )
+    db.session.commit()
+
+    assert lease.security_deposit == Decimal("0.0000")
+
+
+def test_an_unspecified_deposit_still_falls_back_to_the_rent(db, org, scope, application):
+    _ready(db, application)
+    approve_application(db.session, application=application, decided_by_id=DECIDER)
+    db.session.commit()
+
+    lease = convert_to_lease(
+        db.session,
+        application=application,
+        start_date=TODAY + dt.timedelta(days=30),
+        end_date=TODAY + dt.timedelta(days=395),
+    )
+    db.session.commit()
+
+    assert lease.security_deposit == lease.rent_amount
+
+
 def test_a_denied_application_cannot_become_a_lease(db, org, scope, application):
     _ready(db, application)
     deny_application(db.session, application=application, decided_by_id=DECIDER, reasons=["Income"])
@@ -612,9 +650,45 @@ def test_stale_offers_expire_idempotently(db, org, scope, lease_record):
 
 
 @pytest.fixture()
-def move_out(db, org, scope, lease_record):
+def trust_account(db, org, scope, accounts):
+    from app.models.accounting import BankAccount, BankAccountType
+    from app.services.accounting.chart import AccountCode
+
+    record = BankAccount(
+        org_id=org.id,
+        code="TRUST",
+        name="Security deposit trust",
+        account_type=BankAccountType.TRUST,
+        gl_account_id=accounts[AccountCode.CASH_TRUST].id,
+        is_trust=True,
+    )
+    db.session.add(record)
+    db.session.commit()
+    return record
+
+
+@pytest.fixture()
+def move_out(db, org, scope, lease_record, trust_account):
+    """Notice given on a lease whose deposit was actually collected.
+
+    Collected through the service rather than assigned, because what notice
+    captures is what is *held* - and a lease that specifies a deposit nobody
+    took is exactly the case that used to refund money never received.
+    """
+    from app.services.accounting.deposits import collect_deposit
+
     lease_record.status = LeaseStatus.ACTIVE
     lease_record.security_deposit = Decimal("2000.00")
+    db.session.commit()
+
+    collect_deposit(
+        db.session,
+        org_id=org.id,
+        lease_id=lease_record.id,
+        bank_account_id=trust_account.id,
+        amount=Decimal("2000.00"),
+        effective_date=TODAY - dt.timedelta(days=365),
+    )
     db.session.commit()
 
     record = give_notice(
@@ -691,6 +765,29 @@ def test_deductions_reduce_the_refund_and_are_itemised(db, org, scope, move_out)
     assert move_out.deposit_refunded == Decimal("1500.0000")
     assert len(move_out.deduction_detail) == 2
     assert move_out.deduction_detail[0]["description"].startswith("Kitchen")
+
+
+def test_settling_releases_the_money_from_the_trust(db, org, scope, move_out, trust_account):
+    """Accounting for a disposition is not the same as making it.
+
+    Recording the refund on the move-out without releasing the funds leaves the
+    trust reconciliation reporting the deposit as still owed to a resident who
+    has been paid and left - for ever.
+    """
+    from app.services.accounting.deposits import deposit_balance
+
+    record_move_out(db.session, move_out=move_out, actual_date=TODAY - dt.timedelta(days=5))
+    settle_deposit(
+        db.session,
+        move_out=move_out,
+        deductions=[Deduction(description="Kitchen: scorched worktop", amount=Decimal("380.00"))],
+        settled_by_id=DECIDER,
+    )
+    db.session.commit()
+
+    assert deposit_balance(db.session, org_id=org.id, lease_id=move_out.lease_id) == Decimal(
+        "0.0000"
+    )
 
 
 def test_a_deduction_with_no_description_is_refused(db, org, scope, move_out):

@@ -42,8 +42,9 @@ from app.models.accounting import (
     JournalLine,
 )
 from app.models.audit import AuditAction, AuditOutcome, AuditSeverity
-from app.models.leasing import Lease, LeaseStatus
+from app.models.leasing import Lease
 from app.models.types import quantize_money, utcnow
+from app.services.accounting.deposits import deposit_balances
 from app.services.audit.recorder import record_audit_event
 
 __all__ = [
@@ -152,7 +153,9 @@ def reconcile_trust(
             "the ledger. This is a book position, not a reconciliation."
         )
 
-    position.beneficiaries = _beneficiary_balances(session, org_id=org_id, as_of=today)
+    position.beneficiaries = _beneficiary_balances(
+        session, org_id=org_id, bank_account_id=bank_account_id, as_of=today
+    )
 
     for beneficiary in position.beneficiaries:
         if beneficiary.is_impossible:
@@ -232,49 +235,60 @@ def _book_balance(
 
 
 def _beneficiary_balances(
-    session: Session, *, org_id: str, as_of: dt.date
+    session: Session, *, org_id: str, bank_account_id: str, as_of: dt.date
 ) -> list[BeneficiaryBalance]:
-    """What is held for each lease, from the lease's own record.
+    """What each lease is owed out of *this* account, as at ``as_of``.
 
-    Deposits held are tracked on the lease rather than derived from the ledger
-    on purpose: the ledger says how much is in the account, and the lease says
-    whose it is. Deriving the second from the first is what makes the third leg
-    of the reconciliation vacuous.
+    Summed from the deposit subledger rather than read off the lease, because
+    a current-balance column cannot answer either question this leg has to
+    answer.
+
+    **Which account.** An operator with a trust account per jurisdiction needs
+    each reconciled against the deposits that account holds. Scoping by
+    organization alone reports a shortfall on one account and an equal surplus
+    on the other, and - worse - ties out cleanly when one is genuinely short by
+    exactly what the other is over.
+
+    **Which date.** The ledger leg stops at ``as_of``. A beneficiary leg that
+    reports today's balances is being compared against a different point in
+    time, so a year-end tie-out run in March silently includes every deposit
+    taken since.
+
+    Leases with a zero balance are omitted: they are not beneficiaries. A
+    *negative* balance is kept, because the trust having paid out more than it
+    held for somebody is the single most important thing this can find.
     """
-    leases = (
-        session.execute(
+    balances_by_lease = deposit_balances(
+        session, org_id=org_id, bank_account_id=bank_account_id, as_of=as_of
+    )
+    if not balances_by_lease:
+        return []
+
+    leases = {
+        lease.id: lease
+        for lease in session.execute(
             select(Lease).where(
                 Lease.org_id == org_id,
-                Lease.deleted_at.is_(None),
-                Lease.status.in_(
-                    [
-                        LeaseStatus.ACTIVE,
-                        LeaseStatus.HOLDOVER,
-                        LeaseStatus.EXECUTED,
-                        # A terminated lease still appears while its deposit is
-                        # unreturned, which is exactly when it matters.
-                        LeaseStatus.TERMINATED,
-                    ]
-                ),
+                Lease.id.in_(list(balances_by_lease)),
             )
-        )
-        .scalars()
-        .all()
-    )
+        ).scalars()
+    }
 
     balances: list[BeneficiaryBalance] = []
-    for lease in leases:
-        held = lease.deposit_held if lease.deposit_held is not None else ZERO
-        if held == ZERO and lease.status == LeaseStatus.TERMINATED:
+    for lease_id, held in balances_by_lease.items():
+        if held == ZERO:
             continue  # Settled and returned; no longer a beneficiary.
+        lease = leases.get(lease_id)
+        label = lease.lease_number if lease is not None else lease_id
         balances.append(
             BeneficiaryBalance(
-                lease_id=lease.id,
-                lease_number=lease.lease_number,
-                resident_label=lease.lease_number,
+                lease_id=lease_id,
+                lease_number=label,
+                resident_label=label,
                 amount=quantize_money(held),
             )
         )
+    balances.sort(key=lambda beneficiary: beneficiary.lease_number)
     return balances
 
 

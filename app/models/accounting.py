@@ -59,6 +59,8 @@ __all__ = [
     "BillPayment",
     "BillStatus",
     "ChargeCode",
+    "DepositMovement",
+    "DepositMovementKind",
     "FiscalPeriod",
     "Invoice",
     "InvoiceLine",
@@ -929,6 +931,79 @@ class BillPayment(TenantModel):
     )
     voided_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     void_reason: Mapped[str | None] = mapped_column(String(255))
+
+
+# ---------------------------------------------------------------------------
+# Deposits held in trust
+# ---------------------------------------------------------------------------
+
+
+class DepositMovementKind(StrEnum):
+    """Why money entered or left the deposit a lease is owed."""
+
+    COLLECTED = "collected"
+    RETURNED = "returned"
+    #: Withheld against damage or arrears at disposition.
+    APPLIED = "applied"
+    FORFEITED = "forfeited"
+    #: A correction. Signed, so it can go either way.
+    ADJUSTMENT = "adjustment"
+
+
+class DepositMovement(TenantModel):
+    """One movement in what is held in trust for one lease.
+
+    The subledger the three-way reconciliation compares against. It exists as
+    movements rather than a single balance for two reasons, and both are the
+    difference between a reconciliation and a number.
+
+    **A balance cannot be asked about the past.** Tying out a year end in March
+    needs what was held on 31 December, and a current-value column can only
+    ever answer "now" - so the beneficiary leg would be measured at a different
+    date from the ledger leg it is being compared to.
+
+    **A balance does not say where the money is.** An operator with a trust
+    account per jurisdiction needs each one reconciled against the deposits
+    *that account* holds. Without ``bank_account_id`` here, every account gets
+    compared against every deposit, which reports a shortfall on one and a
+    surplus on the other - and hides a real shortfall when the two offset.
+
+    ``amount`` is signed: positive took money in, negative let it out. Summing
+    is then the whole of the arithmetic, and there is no direction flag to get
+    backwards.
+    """
+
+    __tablename__ = "deposit_movements"
+    __table_args__ = (
+        CheckConstraint("amount <> 0", name="amount_non_zero"),
+        Index(
+            "ix_deposit_movements_org_account_date", "org_id", "bank_account_id", "effective_date"
+        ),
+        Index("ix_deposit_movements_org_lease_date", "org_id", "lease_id", "effective_date"),
+    )
+
+    lease_id: Mapped[str] = mapped_column(
+        GUID, ForeignKey("leases.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    #: Which trust account the money sits in. Required: a deposit nobody can
+    #: point at an account for is exactly the one that goes missing.
+    bank_account_id: Mapped[str] = mapped_column(
+        GUID, ForeignKey("bank_accounts.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    #: Signed. Positive is collected, negative is released.
+    amount: Mapped[Decimal] = mapped_column(Money, nullable=False)
+    #: The date the money moved, which is not always the date it was recorded.
+    effective_date: Mapped[dt.date] = mapped_column(Date, nullable=False, index=True)
+    kind: Mapped[DepositMovementKind] = mapped_column(
+        enum_column(DepositMovementKind), nullable=False
+    )
+    reason: Mapped[str | None] = mapped_column(String(255))
+
+    journal_entry_id: Mapped[str | None] = mapped_column(
+        GUID, ForeignKey("journal_entries.id", ondelete="RESTRICT"), index=True
+    )
+    source_type: Mapped[str | None] = mapped_column(String(50))
+    source_id: Mapped[str | None] = mapped_column(GUID)
 
 
 # ---------------------------------------------------------------------------

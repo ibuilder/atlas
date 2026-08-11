@@ -171,6 +171,31 @@ def test_a_vendor_marked_not_reportable_is_excluded(db, org, scope, accounts, op
     assert report.filable == []
 
 
+def test_a_voided_payment_is_not_counted(db, org, scope, accounts, operating):
+    """A stopped cheque was never paid.
+
+    Counting it overstates the return, and an overstated 1099 is one the payee
+    disputes and the filer is held to.
+    """
+    from sqlalchemy import select
+
+    from app.models.accounting import BillPayment
+    from app.models.types import utcnow
+
+    vendor = _paid_vendor(db, org, accounts, operating, code="STOP", amount="5000.00")
+
+    payment = db.session.execute(
+        select(BillPayment).where(BillPayment.org_id == org.id)
+    ).scalar_one()
+    payment.voided_at = utcnow()
+    payment.void_reason = "Cheque stopped; never presented."
+    db.session.commit()
+
+    report = generate_1099_report(db.session, org_id=org.id, year=YEAR)
+    assert report.filable == []
+    assert all(total.vendor.id != vendor.id for total in report.totals)
+
+
 def test_payments_are_counted_by_the_year_they_were_paid(db, org, scope, accounts, operating):
     """A December bill paid in January belongs to January's return."""
     _paid_vendor(db, org, accounts, operating, code="ACME", amount="4500.00")
@@ -228,27 +253,47 @@ def trust_account(db, org, scope, accounts):
     return record
 
 
-def _hold_deposit(db, org, accounts, lease, amount):
-    """Take a deposit into trust: debit trust cash, credit the liability."""
-    from app.services.accounting.ledger import LineInput, post_journal_entry
+def _second_lease(db, org, property_record, unit_record):
+    """Another active lease, so a second beneficiary can exist."""
+    from app.models.leasing import Lease, LeaseStatus
+    from app.models.sequences import SequenceKey
+    from app.services.common.numbering import next_number
 
-    post_journal_entry(
+    lease = Lease(
+        org_id=org.id,
+        lease_number=next_number(db.session, SequenceKey.LEASE, org_id=org.id),
+        property_id=property_record.id,
+        unit_id=unit_record.id,
+        status=LeaseStatus.ACTIVE,
+        start_date=dt.date(YEAR, 2, 1),
+        end_date=dt.date(YEAR + 1, 1, 31),
+        rent_amount=Decimal("2000.00"),
+        security_deposit=Decimal("2000.00"),
+    )
+    db.session.add(lease)
+    db.session.commit()
+    return lease
+
+
+def _hold_deposit(db, org, trust_account, lease, amount, *, on=None):
+    """Take a deposit into trust through the path the application uses.
+
+    Deliberately not hand-posted. Assembling the journal entry and setting the
+    lease's balance by hand is what let the beneficiary leg pass its tests while
+    nothing in the application populated it at all.
+    """
+    from app.services.accounting.deposits import collect_deposit
+
+    movement = collect_deposit(
         db.session,
         org_id=org.id,
-        entry_date=dt.date(YEAR, 1, 15),
-        description=f"Security deposit {lease.lease_number}",
-        lines=[
-            LineInput(account_id=accounts[AccountCode.CASH_TRUST].id, debit=Decimal(amount)),
-            LineInput(
-                account_id=accounts[AccountCode.SECURITY_DEPOSITS_HELD].id, credit=Decimal(amount)
-            ),
-        ],
-        # The deposit liability is a control account, which is the intended
-        # path for it: deposits are posted by the system, not by hand.
-        system_posting=True,
+        lease_id=lease.id,
+        bank_account_id=trust_account.id,
+        amount=Decimal(amount),
+        effective_date=on or dt.date(YEAR, 1, 15),
     )
-    lease.deposit_held = Decimal(amount)
     db.session.commit()
+    return movement
 
 
 def test_a_balanced_trust_ties_out_three_ways(
@@ -257,7 +302,7 @@ def test_a_balanced_trust_ties_out_three_ways(
     from app.models.leasing import LeaseStatus
 
     lease_record.status = LeaseStatus.ACTIVE
-    _hold_deposit(db, org, accounts, lease_record, "2000.00")
+    _hold_deposit(db, org, trust_account, lease_record, "2000.00")
 
     position = reconcile_trust(
         db.session,
@@ -280,31 +325,27 @@ def test_bank_and_book_can_agree_while_the_trust_is_short(
 ):
     """The whole reason the third leg exists.
 
-    Two deposits owed, one deposit's worth of money. Bank and book agree
-    perfectly; the trust is two thousand short, and a two-way reconciliation
-    would report it balanced.
+    Two deposits collected, then two thousand quietly moved out of the trust to
+    operating without being released to anybody. The money really did leave, so
+    bank and book agree perfectly and a two-way reconciliation reports it clean.
+    The beneficiaries are still owed all four thousand.
     """
-    from app.models.leasing import Lease, LeaseStatus
-    from app.models.sequences import SequenceKey
-    from app.services.common.numbering import next_number
+    from app.services.accounting.ledger import LineInput, post_journal_entry
 
-    lease_record.status = LeaseStatus.ACTIVE
-    _hold_deposit(db, org, accounts, lease_record, "2000.00")
+    second = _second_lease(db, org, property_record, unit_record)
+    _hold_deposit(db, org, trust_account, lease_record, "2000.00")
+    _hold_deposit(db, org, trust_account, second, "2000.00")
 
-    # A second resident is owed a deposit that is not in the account.
-    second = Lease(
+    post_journal_entry(
+        db.session,
         org_id=org.id,
-        lease_number=next_number(db.session, SequenceKey.LEASE, org_id=org.id),
-        property_id=property_record.id,
-        unit_id=unit_record.id,
-        status=LeaseStatus.ACTIVE,
-        start_date=dt.date(YEAR, 2, 1),
-        end_date=dt.date(YEAR + 1, 1, 31),
-        rent_amount=Decimal("2000.00"),
-        security_deposit=Decimal("2000.00"),
-        deposit_held=Decimal("2000.00"),
+        entry_date=dt.date(YEAR, 6, 1),
+        description="Transfer to operating",
+        lines=[
+            LineInput(account_id=accounts[AccountCode.CASH_OPERATING].id, debit=Decimal("2000.00")),
+            LineInput(account_id=accounts[AccountCode.CASH_TRUST].id, credit=Decimal("2000.00")),
+        ],
     )
-    db.session.add(second)
     db.session.commit()
 
     position = reconcile_trust(
@@ -323,15 +364,111 @@ def test_bank_and_book_can_agree_while_the_trust_is_short(
     assert not position.is_balanced
 
 
+def test_a_second_trust_account_is_reconciled_against_its_own_deposits(
+    db, org, scope, accounts, trust_account, lease_record, property_record, unit_record
+):
+    """Two trust accounts must not be measured against each other's deposits.
+
+    Scoping beneficiaries by organization alone reports a shortfall on one
+    account and an equal surplus on the other - and, worse, ties out cleanly
+    when one is genuinely short by exactly what the other is over.
+    """
+    second_account = BankAccount(
+        org_id=org.id,
+        code="TRUST2",
+        name="Second jurisdiction trust",
+        account_type=BankAccountType.TRUST,
+        gl_account_id=accounts[AccountCode.CASH_TRUST].id,
+        is_trust=True,
+    )
+    db.session.add(second_account)
+    db.session.commit()
+
+    second_lease = _second_lease(db, org, property_record, unit_record)
+    _hold_deposit(db, org, trust_account, lease_record, "2000.00")
+    _hold_deposit(db, org, second_account, second_lease, "3000.00")
+
+    first = reconcile_trust(
+        db.session,
+        org_id=org.id,
+        bank_account_id=trust_account.id,
+        as_of=dt.date(YEAR, 12, 31),
+        bank_balance=Decimal("2000.00"),
+    )
+    assert first.beneficiary_total == Decimal("2000.0000")
+    assert [b.lease_number for b in first.beneficiaries] == [lease_record.lease_number]
+
+    other = reconcile_trust(
+        db.session,
+        org_id=org.id,
+        bank_account_id=second_account.id,
+        as_of=dt.date(YEAR, 12, 31),
+        bank_balance=Decimal("3000.00"),
+    )
+    assert other.beneficiary_total == Decimal("3000.0000")
+    assert [b.lease_number for b in other.beneficiaries] == [second_lease.lease_number]
+
+
+def test_the_beneficiary_leg_respects_the_as_of_date(
+    db, org, scope, accounts, trust_account, lease_record, property_record, unit_record
+):
+    """A year-end tie-out run later must not see deposits taken since.
+
+    The ledger leg stops at ``as_of``. A beneficiary leg reading current
+    balances is being compared against a different point in time, so the
+    difference moves depending on the day somebody runs the report.
+    """
+    second = _second_lease(db, org, property_record, unit_record)
+    _hold_deposit(db, org, trust_account, lease_record, "2000.00", on=dt.date(YEAR, 1, 15))
+    _hold_deposit(db, org, trust_account, second, "1500.00", on=dt.date(YEAR + 1, 3, 1))
+
+    at_year_end = reconcile_trust(
+        db.session,
+        org_id=org.id,
+        bank_account_id=trust_account.id,
+        as_of=dt.date(YEAR, 12, 31),
+        bank_balance=Decimal("2000.00"),
+    )
+    assert at_year_end.beneficiary_total == Decimal("2000.0000")
+    assert at_year_end.is_balanced
+
+    later = reconcile_trust(
+        db.session,
+        org_id=org.id,
+        bank_account_id=trust_account.id,
+        as_of=dt.date(YEAR + 1, 6, 30),
+        bank_balance=Decimal("3500.00"),
+    )
+    assert later.beneficiary_total == Decimal("3500.0000")
+
+
 def test_a_negative_held_balance_is_called_an_error(
     db, org, scope, accounts, trust_account, lease_record
 ):
-    """Nobody can be owed less than nothing."""
+    """Nobody can be owed less than nothing.
+
+    ``release_deposit`` refuses to over-release, so this is written straight
+    into the subledger: the check exists to catch a balance that arrived some
+    other way - a bad import, a hand-applied correction - not one the service
+    would produce.
+    """
+    from app.models.accounting import DepositMovement, DepositMovementKind
     from app.models.leasing import LeaseStatus
 
     lease_record.status = LeaseStatus.ACTIVE
-    _hold_deposit(db, org, accounts, lease_record, "2000.00")
-    lease_record.deposit_held = Decimal("-500.00")
+    _hold_deposit(db, org, trust_account, lease_record, "2000.00")
+
+    db.session.add(
+        DepositMovement(
+            org_id=org.id,
+            lease_id=lease_record.id,
+            bank_account_id=trust_account.id,
+            amount=Decimal("-2500.00"),
+            effective_date=dt.date(YEAR, 2, 1),
+            kind=DepositMovementKind.ADJUSTMENT,
+            reason="Imported from the previous system.",
+        )
+    )
     db.session.commit()
 
     position = reconcile_trust(
@@ -350,7 +487,7 @@ def test_a_bank_to_book_difference_is_reported(
     from app.models.leasing import LeaseStatus
 
     lease_record.status = LeaseStatus.ACTIVE
-    _hold_deposit(db, org, accounts, lease_record, "2000.00")
+    _hold_deposit(db, org, trust_account, lease_record, "2000.00")
 
     position = reconcile_trust(
         db.session,
@@ -411,7 +548,7 @@ def test_an_unbalanced_trust_is_audited_as_critical(
     from app.models.leasing import LeaseStatus
 
     lease_record.status = LeaseStatus.ACTIVE
-    _hold_deposit(db, org, accounts, lease_record, "2000.00")
+    _hold_deposit(db, org, trust_account, lease_record, "2000.00")
 
     reconcile_trust(
         db.session,

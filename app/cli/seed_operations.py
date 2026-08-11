@@ -475,7 +475,9 @@ def _seed_reconciliation(organization, accounts) -> int:  # noqa: ANN001
         JournalEntry,
         JournalLine,
     )
+    from app.models.leasing import Lease, LeaseStatus
     from app.services.accounting.chart import AccountCode
+    from app.services.accounting.deposits import collect_deposit
     from app.services.accounting.reconciliation import (
         StatementLine,
         auto_match,
@@ -502,6 +504,33 @@ def _seed_reconciliation(organization, accounts) -> int:  # noqa: ANN001
         is_trust=True,
     )
     db.session.add_all([operating, trust])
+    db.session.flush()
+
+    # Take every active lease's deposit into trust, through the same service
+    # the application uses. Without this the demo shows a trust account holding
+    # money that no beneficiary is recorded as owed, which is exactly the
+    # exception the three-way reconciliation exists to raise.
+    active_leases = (
+        db.session.execute(
+            select(Lease).where(
+                Lease.org_id == organization.id,
+                Lease.status == LeaseStatus.ACTIVE,
+                Lease.security_deposit > Decimal("0"),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for lease in active_leases:
+        collect_deposit(
+            db.session,
+            org_id=organization.id,
+            lease_id=lease.id,
+            bank_account_id=trust.id,
+            amount=lease.security_deposit,
+            effective_date=lease.start_date,
+            reason="Deposit taken at move-in.",
+        )
     db.session.flush()
 
     # Reconcile last month, so the window is closed and the figures are stable.

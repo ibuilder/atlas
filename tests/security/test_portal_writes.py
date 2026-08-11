@@ -242,6 +242,63 @@ def test_a_non_numeric_amount_is_refused(client, db, tenancy, open_invoice):
     assert db.session.get(type(open_invoice), open_invoice.id).balance == Decimal("1200.0000")
 
 
+@pytest.mark.parametrize("amount", ["NaN", "-NaN", "Infinity", "-Infinity", "1e400"])
+def test_a_non_finite_amount_is_refused_rather_than_crashing(
+    client, db, tenancy, open_invoice, amount
+):
+    """NaN quantizes cleanly and then raises on comparison rather than failing it.
+
+    Both portal guards read ``amount <= 0`` and ``amount > balance``; against
+    NaN those do not return False, they raise - so without an explicit finite
+    check the route answers a hostile form field with a 500.
+    """
+    _sign_in_resident(client)
+    response = client.post(f"/resident/invoices/{open_invoice.id}/pay", data={"amount": amount})
+
+    assert response.status_code == 302
+    db.session.expire_all()
+    assert db.session.get(type(open_invoice), open_invoice.id).balance == Decimal("1200.0000")
+
+
+def test_the_invoice_the_resident_chose_is_the_one_that_is_paid(
+    client, db, org, scope, accounts, tenancy, lease_record, open_invoice
+):
+    """Applying oldest-first would pay a different invoice and say otherwise.
+
+    ``record_payment`` retires the lease's open invoices oldest-due-first when
+    it is given no allocation, so a resident settling this month's rent while
+    last month's is outstanding would have cleared the wrong one - and been
+    told, in the confirmation, that they had cleared this one.
+    """
+    from app.models.accounting import InvoiceStatus
+    from app.services.accounting.chart import AccountCode
+    from app.services.accounting.receivables import ChargeInput, issue_invoice
+
+    older = issue_invoice(
+        db.session,
+        org_id=org.id,
+        charges=[
+            ChargeInput(
+                description="February rent",
+                amount=Decimal("1200.00"),
+                account_id=accounts[AccountCode.RENTAL_INCOME].id,
+            )
+        ],
+        issue_date=dt.date(2026, 2, 1),
+        due_date=dt.date(2026, 2, 1),
+        lease=lease_record,
+        property_id=lease_record.property_id,
+    )
+    db.session.commit()
+
+    _sign_in_resident(client)
+    client.post(f"/resident/invoices/{open_invoice.id}/pay", data={"amount": "1200.00"})
+    db.session.expire_all()
+
+    assert db.session.get(type(open_invoice), open_invoice.id).status == InvoiceStatus.PAID
+    assert db.session.get(type(older), older.id).balance == Decimal("1200.0000")
+
+
 def test_an_anonymous_visitor_cannot_pay(client, open_invoice):
     response = client.post(f"/resident/invoices/{open_invoice.id}/pay", data={"amount": "1.00"})
     assert response.status_code in (302, 401)
@@ -456,6 +513,19 @@ def test_a_vendor_cannot_cancel_or_verify(client, db, vendor_login, assigned_wor
     assert db.session.get(WorkOrder, assigned_work.id).status == WorkOrderStatus.ASSIGNED
 
 
+@pytest.mark.parametrize("cost", ["NaN", "Infinity"])
+def test_non_finite_costs_are_refused_rather_than_crashing(
+    client, db, vendor_login, assigned_work, cost
+):
+    """Same shape as the pay route: NaN fails the comparison by raising."""
+    _sign_in_vendor(client)
+    response = client.post(
+        f"/vendor/work-orders/{assigned_work.id}",
+        data={"action": "complete", "labor_cost": cost, "material_cost": "0"},
+    )
+    assert response.status_code == 302
+
+
 def test_negative_costs_are_refused(client, db, vendor_login, assigned_work):
     _sign_in_vendor(client)
     client.post(f"/vendor/work-orders/{assigned_work.id}", data={"action": "start"})
@@ -563,6 +633,18 @@ def test_a_statement_detail_shows_the_arithmetic(client, db, org, owner_login, p
     assert "Management fee" in body
     assert "Closing balance" in body
     assert "100.0000%" in body or "100.0%" in body or "100" in body
+
+
+def test_an_owner_with_no_statements_yet_sees_an_empty_page(client, owner_login):
+    """Not a 500.
+
+    Substituting a sentinel id for an empty ``IN`` list binds it through the
+    GUID type, which validates identifiers - so a brand-new owner, or any owner
+    before the first month-end run, got a crash instead of a page.
+    """
+    _sign_in_owner(client)
+    response = client.get("/owner/statements")
+    assert response.status_code == 200
 
 
 def test_an_owner_cannot_read_another_owners_statement(

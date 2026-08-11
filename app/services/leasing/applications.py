@@ -678,7 +678,10 @@ def convert_to_lease(
         start_date=start_date,
         end_date=end_date,
         rent_amount=quantize_money(rent),
-        security_deposit=quantize_money(security_deposit or rent),
+        # ``is not None`` rather than ``or``: a deposit of zero is a real
+        # answer - a deposit-replacement rider in place of one - and treating
+        # it as "unspecified" writes a month's rent the resident never paid.
+        security_deposit=quantize_money(security_deposit if security_deposit is not None else rent),
     )
     session.add(lease)
     session.flush()

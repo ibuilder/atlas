@@ -344,7 +344,9 @@ def _seed_leases(organization, units):  # noqa: ANN001, ANN202
             move_in_date=start,
             rent_amount=unit.market_rent or Decimal("2400"),
             security_deposit=unit.deposit_amount or Decimal("2400"),
-            deposit_held=unit.deposit_amount or Decimal("2400"),
+            # ``deposit_held`` is deliberately not set here. It is maintained
+            # by the deposit subledger, and seeding it directly is what let the
+            # trust reconciliation look populated while nothing filled it.
             billing_day=1,
         )
         db.session.add(lease)

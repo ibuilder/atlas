@@ -36,10 +36,16 @@ from sqlalchemy.orm import Session
 
 from app.errors import BusinessRuleViolation, NotFound, ValidationFailed
 from app.logging import get_logger
+from app.models.accounting import DepositMovementKind
 from app.models.audit import AuditAction, AuditOutcome, AuditSeverity
 from app.models.leasing import Lease, LeaseRenewal, LeaseStatus, MoveOut
 from app.models.sequences import SequenceKey
 from app.models.types import quantize_money, utcnow
+from app.services.accounting.deposits import (
+    deposit_balance,
+    holding_account_id,
+    release_deposit,
+)
 from app.services.audit.recorder import record_audit_event
 from app.services.common.numbering import next_number
 
@@ -282,7 +288,10 @@ def give_notice(
         scheduled_date=scheduled_date,
         reason=reason,
         is_early_termination=is_early_termination,
-        deposit_held=lease.security_deposit,
+        # What was actually taken, not what the lease specified. Settling
+        # against the contracted figure refunds money that was never collected
+        # - and where a deposit was waived, refunds a full month's rent.
+        deposit_held=deposit_balance(session, org_id=lease.org_id, lease_id=lease.id),
     )
     session.add(move_out)
     session.flush()
@@ -437,12 +446,44 @@ def settle_deposit(
     today = as_of or utcnow().date()
     on_time = move_out.disposition_due_by is None or today <= move_out.disposition_due_by
 
+    refunded = quantize_money(held - total)
+
     move_out.deposit_deductions = total
-    move_out.deposit_refunded = quantize_money(held - total)
+    move_out.deposit_refunded = refunded
     move_out.deduction_detail = [d.as_line() for d in deductions]
     move_out.disposition_sent_at = utcnow()
     move_out.status = "settled"
     session.flush()
+
+    # Take the money out of trust as well as accounting for it on the move-out.
+    # Recording the disposition without releasing the funds leaves the trust
+    # reconciliation reporting the deposit as still owed, for ever.
+    if held > ZERO:
+        account_id = holding_account_id(session, org_id=move_out.org_id, lease_id=move_out.lease_id)
+        if account_id is None:  # pragma: no cover - held > 0 implies an account
+            raise BusinessRuleViolation(
+                "The deposit balance is not held in any trust account, so there "
+                "is nothing to release. Record how it was collected first."
+            )
+        for amount, kind in (
+            (total, DepositMovementKind.APPLIED),
+            (refunded, DepositMovementKind.RETURNED),
+        ):
+            if amount <= ZERO:
+                continue
+            release_deposit(
+                session,
+                org_id=move_out.org_id,
+                lease_id=move_out.lease_id,
+                bank_account_id=account_id,
+                amount=amount,
+                kind=kind,
+                effective_date=today,
+                reason=f"Deposit disposition for move-out {move_out.id}.",
+                source_type="move_out",
+                source_id=move_out.id,
+                actor_id=settled_by_id,
+            )
 
     if not on_time:
         log.error(
