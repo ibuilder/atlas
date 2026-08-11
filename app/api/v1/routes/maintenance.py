@@ -121,7 +121,7 @@ def create_request() -> Response:
     )
 
 
-@api_v1_bp.get("/requests/<request_id>", endpoint="requests_get")
+@api_v1_bp.get("/requests/<id:request_id>", endpoint="requests_get")
 def get_request(request_id: str) -> Response:
     record = _get_request(request_id)
     require(Perm.REQUEST_READ, record)
@@ -192,14 +192,14 @@ def create_work_order() -> Response:
     )
 
 
-@api_v1_bp.get("/work-orders/<work_order_id>", endpoint="work_orders_get")
+@api_v1_bp.get("/work-orders/<id:work_order_id>", endpoint="work_orders_get")
 def get_work_order(work_order_id: str) -> Response:
     record = _get_work_order(work_order_id)
     require(Perm.WORK_ORDER_READ, record)
     return add_etag(respond(WorkOrderOut.model_validate(record, from_attributes=True)), record)
 
 
-@api_v1_bp.post("/work-orders/<work_order_id>/transition", endpoint="work_orders_transition")
+@api_v1_bp.post("/work-orders/<id:work_order_id>/transition", endpoint="work_orders_transition")
 def transition_work_order(work_order_id: str) -> Response:
     record = _get_work_order(work_order_id)
     payload = parse_body(WorkOrderTransition)
@@ -239,7 +239,7 @@ def transition_work_order(work_order_id: str) -> Response:
     return add_etag(respond(WorkOrderOut.model_validate(record, from_attributes=True)), record)
 
 
-@api_v1_bp.get("/work-orders/<work_order_id>/timeline", endpoint="work_orders_timeline")
+@api_v1_bp.get("/work-orders/<id:work_order_id>/timeline", endpoint="work_orders_timeline")
 def work_order_timeline(work_order_id: str) -> Response:
     record = _get_work_order(work_order_id)
     require(Perm.WORK_ORDER_READ, record)

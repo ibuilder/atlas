@@ -294,7 +294,7 @@ def roles() -> str:
     )
 
 
-@admin_bp.get("/roles/<role_id>")
+@admin_bp.get("/roles/<id:role_id>")
 @login_required
 def role_detail(role_id: str) -> str:
     """One role: what it grants, and who holds it."""

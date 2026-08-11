@@ -23,6 +23,7 @@ from typing import Any
 
 from flask import Flask, Response, g, request
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.routing import BaseConverter
 
 from app.context import (
     RequestContext,
@@ -198,3 +199,33 @@ def _apply_cache_policy(response: Response) -> None:
     if any(request.path.startswith(prefix) for prefix in _SENSITIVE_PATH_PREFIXES):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
         response.headers["Pragma"] = "no-cache"
+
+
+class IdentifierConverter(BaseConverter):
+    """A URL segment that must be a UUID to name anything at all.
+
+    Registered as the default converter for ``*_id`` parameters, so a malformed
+    identifier is a 404 from the router rather than a ValueError from the
+    database driver surfacing as a 500. The GUID type deliberately validates at
+    the bind boundary - that is right, and it is why the failure has to be
+    caught before the query rather than after it.
+
+    404 rather than 400: a non-identifier cannot name a record, and answering
+    differently for "malformed" and "not yours" hands an attacker an oracle.
+    """
+
+    #: Matches the canonical hyphenated form, case-insensitively. Anything else
+    #: - a path traversal, an injection payload, a bare integer - does not
+    #: match the rule and never reaches a view.
+    regex = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+
+    def to_python(self, value: str) -> str:
+        return value.lower()
+
+    def to_url(self, value: object) -> str:
+        return str(value)
+
+
+def register_url_converters(app: Flask) -> None:
+    """Install the identifier converter under a name routes can use."""
+    app.url_map.converters["id"] = IdentifierConverter

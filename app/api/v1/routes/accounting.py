@@ -63,7 +63,7 @@ def list_invoices() -> Response:
     return respond_collection(page, InvoiceOut)
 
 
-@api_v1_bp.get("/invoices/<invoice_id>", endpoint="invoices_get")
+@api_v1_bp.get("/invoices/<id:invoice_id>", endpoint="invoices_get")
 def get_invoice(invoice_id: str) -> Response:
     record = db.session.get(Invoice, invoice_id)
     if record is None:

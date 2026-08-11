@@ -254,7 +254,7 @@ def _assert_no_overlapping_lease(
         )
 
 
-@api_v1_bp.post("/leases/<lease_id>/activate", endpoint="leases_activate")
+@api_v1_bp.post("/leases/<id:lease_id>/activate", endpoint="leases_activate")
 def activate_lease(lease_id: str) -> Response:
     """Move a lease into effect and mark the unit occupied."""
     lease = db.session.get(Lease, lease_id)

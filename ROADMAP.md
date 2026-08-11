@@ -194,9 +194,14 @@ portfolio on this:
       timing table in that runbook filled in. Written is not executed, and the
       drill is the point.
 - [ ] **Load tested** to the stated budgets: P95 < 300ms reads, < 700ms writes.
-      Needs production-shaped hardware and data volumes.
+      Needs production-shaped hardware and data volumes. The harness exists and
+      fails the run on a breach — see [tests/load/](tests/load/README.md) — so
+      what is missing is somewhere to run it, not something to run.
 - [ ] **Penetration test** against the authorization and tenancy boundaries, by
-      somebody who did not write them.
+      somebody who did not write them. `tests/security/test_attack_surface.py`
+      is the starting point that test should not have to rediscover; it is
+      explicitly *not* a substitute, because a suite written by the author
+      tests the attacks the author thought of.
 - [ ] **90-day soak** on a real portfolio with no unexplained ledger variance.
 
 The last four are deliberately unticked. Three of them require a running

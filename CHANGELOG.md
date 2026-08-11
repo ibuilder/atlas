@@ -52,8 +52,29 @@ codes and the `/api/v1` namespace are already treated as stable.
 - Two new reports, `tax_1099` and `trust_position`, so both are deliverable
   rather than merely callable.
 
+- A load profile against the stated P95 budgets, which fails the run on a
+  breach rather than printing numbers nobody reads, and an adversarial suite
+  over the tenancy and authorization boundaries. Neither ticks a 1.0 condition
+  — load testing needs production-shaped hardware, and a penetration test needs
+  somebody who did not write the code — but both make those checks executable
+  rather than aspirational.
+
 ### Fixed
 
+- **Open redirect on the login page.** `_safe_next` refused `//evil.test` and
+  anything with a scheme, but accepted `/\evil.test` — and browsers normalise
+  the backslash, making it protocol-relative and therefore offsite. Found by
+  the new attack suite. Backslashes are now rejected and the result is parsed
+  as a final check; the login form also no longer echoes an unsafe `next` value
+  back into the page.
+- **A malformed identifier in a URL returned 500.** The GUID type validates at
+  the bind boundary, which is right, but the resulting `ValueError` surfaced as
+  an unhandled error — so a path-traversal string in a document URL produced a
+  stack-trace-shaped response instead of a 404. There is now an `id` URL
+  converter, applied to every `*_id` route segment, so a non-identifier never
+  reaches a view. 404 rather than 400: a non-identifier cannot name a record,
+  and answering differently for "malformed" and "not yours" hands an attacker
+  an oracle.
 - `LeaseRenewal.rent_increase` reached for a relationship that was never
   declared, so `hasattr` was always false and it returned `None` for every
   offer ever made. The relationship now exists and the property works.

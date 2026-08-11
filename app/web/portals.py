@@ -266,7 +266,7 @@ def _resident_invoice(invoice_id: str, org_id: str) -> Invoice:
 # ---------------------------------------------------------------------------
 
 
-@resident_bp.post("/invoices/<invoice_id>/pay", endpoint="pay_invoice")
+@resident_bp.post("/invoices/<id:invoice_id>/pay", endpoint="pay_invoice")
 @login_required
 def resident_pay_invoice(invoice_id: str) -> Response:
     """Pay an invoice from the portal rather than only through the API."""
@@ -414,7 +414,7 @@ def owner_statements() -> str:
     )
 
 
-@owner_bp.get("/statements/<statement_id>", endpoint="statement_detail")
+@owner_bp.get("/statements/<id:statement_id>", endpoint="statement_detail")
 @login_required
 def owner_statement_detail(statement_id: str) -> str:
     """One statement, with the arithmetic that produced it.
@@ -471,7 +471,7 @@ def owner_statement_detail(statement_id: str) -> str:
 VENDOR_TRANSITIONS = ("accept", "start", "hold", "complete")
 
 
-@vendor_bp.post("/work-orders/<work_order_id>", endpoint="update_work_order")
+@vendor_bp.post("/work-orders/<id:work_order_id>", endpoint="update_work_order")
 @login_required
 def vendor_update_work_order(work_order_id: str) -> Response:
     """Accept, start, hold, or complete a job from a phone in a basement."""

@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.wrappers import Response
@@ -36,18 +38,42 @@ def _safe_next(target: str | None) -> str:
     """
     if not target:
         return url_for("public.index")
-    if target.startswith("//") or "://" in target:
-        return url_for("public.index")
     if not target.startswith("/"):
         return url_for("public.index")
+    if target.startswith("//") or "://" in target:
+        return url_for("public.index")
+    # A backslash is the bypass: browsers normalise "/\evil.test" to
+    # "//evil.test", which is protocol-relative and therefore offsite. The
+    # three checks above all pass it.
+    if "\\" in target:
+        return url_for("public.index")
+    # Belt and braces against anything else that parses as absolute.
+    parsed = urlparse(target)
+    if parsed.scheme or parsed.netloc:
+        return url_for("public.index")
     return target
+
+
+def _echoable_next(target: str | None) -> str:
+    """What is safe to place back into the form.
+
+    Empty rather than the index path: the field means "where the user was
+    going", and a value nobody asked for is worse than none.
+    """
+    if not target:
+        return ""
+    return target if _safe_next(target) == target else ""
 
 
 @auth_bp.get("/login")
 def login_form() -> Response | str:
     if getattr(current_user, "is_authenticated", False):
         return redirect(url_for("public.index"))
-    return render_template("auth/login.html", next=request.args.get("next", ""))
+    # Sanitised on the way *in* as well as on the way out. The template escapes
+    # it, so echoing a hostile value back is inert rather than XSS - but a page
+    # that carries "javascript:..." in a field is one refactor away from
+    # putting it in an href, and there is no reason to hold it at all.
+    return render_template("auth/login.html", next=_echoable_next(request.args.get("next")))
 
 
 @auth_bp.post("/login")

@@ -131,7 +131,7 @@ def upload_document() -> Response:
     )
 
 
-@api_v1_bp.get("/documents/<document_id>", endpoint="documents_get")
+@api_v1_bp.get("/documents/<id:document_id>", endpoint="documents_get")
 def get_document(document_id: str) -> Response:
     """Document metadata, including scan state."""
     record = _get_document(document_id)
@@ -139,7 +139,7 @@ def get_document(document_id: str) -> Response:
     return respond(DocumentOut.model_validate(record, from_attributes=True))
 
 
-@api_v1_bp.post("/documents/<document_id>/links", endpoint="documents_link")
+@api_v1_bp.post("/documents/<id:document_id>/links", endpoint="documents_link")
 def link_document(document_id: str) -> Response:
     """Attach a document to another entity.
 
@@ -172,7 +172,7 @@ def link_document(document_id: str) -> Response:
     )
 
 
-@api_v1_bp.post("/documents/<document_id>/download-url", endpoint="documents_download_url")
+@api_v1_bp.post("/documents/<id:document_id>/download-url", endpoint="documents_download_url")
 def create_download_url(document_id: str) -> Response:
     """Mint a signed, expiring retrieval link."""
     record = _get_document(document_id)

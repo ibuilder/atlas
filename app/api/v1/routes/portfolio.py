@@ -116,7 +116,7 @@ def create_property() -> Response:
     )
 
 
-@api_v1_bp.get("/properties/<property_id>", endpoint="properties_get")
+@api_v1_bp.get("/properties/<id:property_id>", endpoint="properties_get")
 def get_property(property_id: str) -> Response:
     record = _get_property(property_id)
     require(Perm.PROPERTY_READ, record)
@@ -129,7 +129,7 @@ def get_property(property_id: str) -> Response:
     return add_etag(response, record)
 
 
-@api_v1_bp.patch("/properties/<property_id>", endpoint="properties_update")
+@api_v1_bp.patch("/properties/<id:property_id>", endpoint="properties_update")
 def update_property(property_id: str) -> Response:
     record = _get_property(property_id)
     require(Perm.PROPERTY_UPDATE, record)
@@ -213,7 +213,7 @@ def create_unit() -> Response:
     )
 
 
-@api_v1_bp.get("/units/<unit_id>", endpoint="units_get")
+@api_v1_bp.get("/units/<id:unit_id>", endpoint="units_get")
 def get_unit(unit_id: str) -> Response:
     record = _get_unit(unit_id)
     require(Perm.UNIT_READ, record)
@@ -223,7 +223,7 @@ def get_unit(unit_id: str) -> Response:
     return add_etag(respond(UnitOut.model_validate(record, from_attributes=True)), record)
 
 
-@api_v1_bp.patch("/units/<unit_id>", endpoint="units_update")
+@api_v1_bp.patch("/units/<id:unit_id>", endpoint="units_update")
 def update_unit(unit_id: str) -> Response:
     record = _get_unit(unit_id)
     require(Perm.UNIT_MANAGE, record)

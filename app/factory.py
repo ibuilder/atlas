@@ -18,7 +18,7 @@ from flask import Flask, Response, jsonify
 from app.config import Settings, load_settings
 from app.errors import register_error_handlers
 from app.logging import configure_logging, get_logger
-from app.middleware import init_middleware
+from app.middleware import init_middleware, register_url_converters
 from app.observability import init_observability
 
 __all__ = ["create_app"]
@@ -54,6 +54,7 @@ def create_app(config_name: str | None = None, **overrides: Any) -> Flask:
     _init_persistence(app, settings)
     _init_security(app, settings)
 
+    register_url_converters(app)
     init_middleware(app)
     register_error_handlers(app)
     init_observability(app)
