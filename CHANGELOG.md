@@ -12,6 +12,17 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Fixed
 
+- `score_match` in bank reconciliation read `JournalEntry.reference`, a field
+  that does not exist - so every transaction where the bank supplied a
+  reference raised `AttributeError` instead of scoring. The branch was never
+  covered because no test set a reference on a statement line. Found by the
+  demo seed running through it. Now reads the entry number and memos, with
+  tests either side.
+- Two modules compared a local `date.today()` against the services' UTC clock.
+  They agree for most of the day and disagree either side of the UTC rollover,
+  which is a test that passes all morning and fails in the evening - as one
+  did, at 21:30 local. Both now use the same clock the code under test uses.
+
 - The single-sign-on migration was hand-written and did not match what the
   models declare: it missed `delete_reason` from the soft-delete mixin, used a
   plain `String` where the models use the portable enum type, omitted the

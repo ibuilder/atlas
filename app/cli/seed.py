@@ -5,6 +5,12 @@ residents on leases, invoices with payments applied, maintenance running through
 to completed work orders, a vendor with live insurance, and a signed-in user for
 every role so each portal can be walked from one seed.
 
+:mod:`app.cli.seed_operations` then layers on everything built after the core -
+a space hierarchy with equipment in it, an automation rule that has served its
+dry run, a completed reconciliation, an inspection that raised work, owner
+statements across a mid-period transfer. Split in two because the first half is
+the company and the second half is how it is run, and the two read better apart.
+
 Deliberately a CLI command rather than application bootstrap. Seed data that
 loads itself on startup ends up in production exactly once, and that once is
 enough.
@@ -65,6 +71,15 @@ def seed_demo(slug: str, force: bool) -> None:
         _seed_maintenance(organization, properties, units, leases, vendor, users)
         db.session.commit()
 
+        # Everything built after the core: spaces and equipment, preventive
+        # schedules, an inspection, automation, banking, ownership, reporting.
+        from app.cli.seed_operations import seed_operations
+
+        operations = seed_operations(
+            organization, properties, units, leases, vendor, users, accounts
+        )
+        db.session.commit()
+
     click.echo("")
     click.secho("  Atlas demo ready.", bold=True)
     click.echo(f"  Organization : {organization.name} ({organization.slug})")
@@ -72,6 +87,23 @@ def seed_demo(slug: str, force: bool) -> None:
     click.echo(f"  Units        : {len(units)}")
     click.echo(f"  Residents    : {len(residents)}")
     click.echo(f"  Leases       : {len(leases)}")
+    click.echo("")
+    click.echo(f"  Spaces       : {operations['spaces']} (nested hierarchy on Harrow Court)")
+    click.echo(f"  Assets       : {operations['assets']} with warranty and service history")
+    click.echo(f"  PM schedules : {operations['pm_schedules']} (one seasonal)")
+    click.echo(f"  Inspections  : {operations['inspections']} completed, work raised from findings")
+    click.echo(
+        f"  Automation   : {operations['automation_rules']} rules (one live, one in dry run)"
+    )
+    click.echo(f"  Reconciled   : {operations['reconciliations']} bank statement period")
+    click.echo(
+        f"  Statements   : {operations['owner_statements']} owner statements across a transfer"
+    )
+    click.echo(f"  Reports      : {operations['scheduled_reports']} scheduled")
+    click.echo(
+        f"  SSO          : {operations['identity_providers']} provider configured (inactive)"
+    )
+    click.echo(f"  KPI history  : {operations['kpi_points']} snapshots over 15 days")
     _print_credentials(slug)
 
 

@@ -386,8 +386,18 @@ def score_match(
 
     reference = (transaction.reference or "").strip().lower()
     if reference:
+        # The entry number is what a payment reference usually carries, and the
+        # memo is where a person writes the cheque number.
         haystack = " ".join(
-            filter(None, [entry.reference or "", line.memo or "", entry.description or ""])
+            filter(
+                None,
+                [
+                    entry.entry_number or "",
+                    entry.memo or "",
+                    line.memo or "",
+                    entry.description or "",
+                ],
+            )
         ).lower()
         if reference in haystack:
             score += 15

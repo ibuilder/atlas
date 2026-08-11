@@ -493,3 +493,39 @@ def test_statements_do_not_cross_organizations(db, org, other_org, scope, bank):
 
     with pytest.raises(NotFound):
         import_statement(db.session, org_id=other_org.id, bank_account_id=bank.id, lines=[_line()])
+
+
+def test_a_matching_reference_raises_the_score(db, org, scope, accounts, bank):
+    """The branch that reads the ledger entry for a reference.
+
+    Untested until the demo seed ran through it and it raised AttributeError on
+    a field that does not exist - a scoring path that crashed rather than
+    scored, on every transaction the bank supplied a reference for.
+    """
+    line = _ledger_receipt(db, org, accounts)
+    entry_number = db.session.get(type(line.entry), line.journal_entry_id).entry_number
+
+    with_reference = import_statement(
+        db.session,
+        org_id=org.id,
+        bank_account_id=bank.id,
+        lines=[_line(reference=entry_number)],
+    ).imported[0]
+
+    candidates = suggest_matches(db.session, transaction=with_reference)
+    assert candidates
+    assert any("reference appears" in reason for reason in candidates[0].reasons)
+
+
+def test_an_unmatched_reference_does_not_raise_the_score(db, org, scope, accounts, bank):
+    _ledger_receipt(db, org, accounts)
+    transaction = import_statement(
+        db.session,
+        org_id=org.id,
+        bank_account_id=bank.id,
+        lines=[_line(reference="SOMETHING-ELSE")],
+    ).imported[0]
+
+    candidates = suggest_matches(db.session, transaction=transaction)
+    assert candidates
+    assert not any("reference appears" in reason for reason in candidates[0].reasons)

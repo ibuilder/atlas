@@ -23,6 +23,7 @@ from app.models.asset_graph import (
     ServiceEventType,
     Warranty,
 )
+from app.models.types import utcnow
 from app.services.assets.capital import (
     DEFAULT_INFLATION,
     forecast_asset,
@@ -40,7 +41,11 @@ from app.services.assets.lifecycle import (
 
 pytestmark = pytest.mark.integration
 
-TODAY = dt.date.today()
+#: The services stamp and compare in UTC, so the tests have to as well. A local
+#: date.today() agrees with utcnow().date() for most of the day and disagrees
+#: either side of the UTC rollover - a test that passes all morning and fails
+#: in the evening.
+TODAY = utcnow().date()
 
 
 @pytest.fixture()
