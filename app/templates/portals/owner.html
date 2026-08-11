@@ -6,7 +6,10 @@
 {% block nav %}
 <div class="sidebar__group">
   <div class="sidebar__label">Owner</div>
-  <a class="sidebar__link" href="{{ url_for('owner.dashboard') }}" aria-current="page">Overview</a>
+  <a class="sidebar__link" href="{{ url_for('owner.dashboard') }}"
+     aria-current="page">Overview</a>
+  <a class="sidebar__link" href="{{ url_for('owner.statements') }}"
+     >Statements</a>
 </div>
 {% endblock %}
 

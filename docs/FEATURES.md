@@ -96,9 +96,9 @@ feature list is how a buyer discovers the gap during implementation.
 
 | Capability | Status | Notes |
 |---|---|---|
-| Resident portal | **Partial** | Balance, lease, invoices, and request history render; payment submission is API-only. |
-| Owner portal | **Partial** | Properties, receivables, and open work render; statements generate and can be issued, but the portal does not yet render them. |
-| Vendor portal | **Partial** | Assigned work and compliance standing render; no field update UI. |
+| Resident portal | **Complete** | Balance, lease, invoices, and request history, plus paying an invoice and reporting a fault from the portal itself. An empty amount box pays the balance; overpayment is refused, because a typo there mints a credit somebody has to chase. |
+| Owner portal | **Complete** | Properties, receivables, open work, and the statements themselves - list and detail, with the arithmetic and the day-weighted ownership share that produced them. |
+| Vendor portal | **Complete** | Assigned work and compliance standing, plus accepting, starting, holding, and completing a job with its labour and material costs entered on site. Cancelling, reassigning, and verifying stay with the management company. |
 | Messaging and notices | **Partial** | Delinquency notices are issued with delivery evidence and statutory response deadlines; general messaging threads remain modelled only. |
 
 ## Documents and assets

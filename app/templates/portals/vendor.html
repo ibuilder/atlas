@@ -35,7 +35,7 @@
     <div class="table-wrap">
       <table class="data">
         <thead>
-          <tr><th>Order</th><th>Title</th><th>Priority</th><th>Status</th><th>Due</th><th>Scheduled</th></tr>
+          <tr><th>Order</th><th>Title</th><th>Priority</th><th>Status</th><th>Due</th><th>Scheduled</th><th>Update</th></tr>
         </thead>
         <tbody>
           {% for order in work_orders %}
@@ -52,6 +52,29 @@
                 {% endif %}
               </td>
               <td class="tiny dim nowrap">{{ order.scheduled_start | datetime }}</td>
+              <td>
+                <form method="post"
+                      action="{{ url_for('vendor.update_work_order', work_order_id=order.id) }}"
+                      class="stack">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <select name="action" aria-label="Update {{ order.work_order_number }}">
+                    <option value="accept">Accept</option>
+                    <option value="start">Start work</option>
+                    <option value="hold">Put on hold</option>
+                    <option value="complete">Complete</option>
+                  </select>
+                  <input type="text" name="note" maxlength="2000" placeholder="Note (optional)">
+                  {# Only read when completing; asked here so the costs are
+                     entered on site rather than reconstructed weeks later. #}
+                  <div class="row">
+                    <input type="text" name="labor_cost" inputmode="decimal"
+                           placeholder="Labour" aria-label="Labour cost" style="max-width:7rem">
+                    <input type="text" name="material_cost" inputmode="decimal"
+                           placeholder="Parts" aria-label="Material cost" style="max-width:7rem">
+                  </div>
+                  <button class="btn btn--sm" type="submit">Update</button>
+                </form>
+              </td>
             </tr>
           {% endfor %}
         </tbody>

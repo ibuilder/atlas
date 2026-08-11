@@ -4,6 +4,15 @@ Each portal is scoped by the policy engine's ownership predicates rather than by
 a hand-written ``WHERE`` clause per view. A resident sees their lease because
 the engine says the lease is theirs, not because this file remembered to filter.
 
+The write surfaces follow one rule, and it is the rule that matters when the
+caller is a resident rather than a member of staff: **the portal proves the
+subject belongs to the caller before it acts on it.** Every POST re-derives the
+set of leases, properties, or work orders the signed-in user owns and refuses
+anything outside it - as a *404*, so the portal cannot be used to discover
+which identifiers exist. A permission check alone is not enough here: every
+resident holds ``payment.create``, so the question is never "may they pay?" but
+"is this their invoice?".
+
 SPDX-License-Identifier: MIT
 """
 
@@ -11,11 +20,12 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from flask import Blueprint, render_template
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import select
+from werkzeug.wrappers import Response
 
-from app.errors import PermissionDenied
+from app.errors import AtlasError, PermissionDenied
 from app.extensions import db
 from app.middleware import require_org_scope
 from app.models.accounting import Invoice, InvoiceStatus
@@ -199,3 +209,340 @@ def vendor_dashboard() -> str:
     )
 
     return render_template("portals/vendor.html", vendor=vendor, work_orders=assigned)
+
+
+# ---------------------------------------------------------------------------
+# Ownership: the check that actually protects these routes
+# ---------------------------------------------------------------------------
+
+
+def _resident_lease_ids(org_id: str) -> list[str]:
+    return [
+        row
+        for row in db.session.execute(
+            select(Tenancy.lease_id).where(
+                Tenancy.resident_id == current_user.resident_id, Tenancy.org_id == org_id
+            )
+        ).scalars()
+    ]
+
+
+def _owned_property_ids(org_id: str) -> list[str]:
+    return [
+        row
+        for row in db.session.execute(
+            select(OwnershipStake.property_id).where(
+                OwnershipStake.owner_entity_id == current_user.owner_entity_id,
+                OwnershipStake.org_id == org_id,
+            )
+        ).scalars()
+    ]
+
+
+def _resident_invoice(invoice_id: str, org_id: str) -> Invoice:
+    """An open invoice on one of the caller's own leases, or a 404.
+
+    404 rather than 403: telling a resident that an invoice exists but is not
+    theirs turns the portal into a way to enumerate the building's invoices.
+    """
+    lease_ids = _resident_lease_ids(org_id)
+    if not lease_ids:
+        abort(404)
+
+    invoice = db.session.execute(
+        select(Invoice).where(
+            Invoice.id == invoice_id,
+            Invoice.org_id == org_id,
+            Invoice.lease_id.in_(lease_ids),
+        )
+    ).scalar_one_or_none()
+    if invoice is None:
+        abort(404)
+    return invoice
+
+
+# ---------------------------------------------------------------------------
+# Resident: paying, and raising a request
+# ---------------------------------------------------------------------------
+
+
+@resident_bp.post("/invoices/<invoice_id>/pay", endpoint="pay_invoice")
+@login_required
+def resident_pay_invoice(invoice_id: str) -> Response:
+    """Pay an invoice from the portal rather than only through the API."""
+    _require_user_type(UserType.RESIDENT)
+    require(Perm.PAYMENT_RECORD)
+    org_id = require_org_scope()
+
+    from app.models.accounting import PaymentMethod
+    from app.models.types import quantize_money, utcnow
+    from app.services.accounting.receivables import record_payment
+
+    invoice = _resident_invoice(invoice_id, org_id)
+    if invoice.status not in (InvoiceStatus.OPEN, InvoiceStatus.PARTIALLY_PAID):
+        flash("That invoice is not open for payment.", "error")
+        return redirect(url_for("resident.dashboard"))
+
+    raw = (request.form.get("amount") or "").strip()
+    try:
+        amount = quantize_money(Decimal(raw)) if raw else invoice.balance
+    except (ArithmeticError, ValueError):
+        flash("That is not an amount.", "error")
+        return redirect(url_for("resident.dashboard"))
+
+    if amount <= Decimal("0"):
+        flash("A payment must be greater than zero.", "error")
+        return redirect(url_for("resident.dashboard"))
+    if amount > invoice.balance:
+        # Overpayment through a portal is nearly always a typo, and the credit
+        # it would create is somebody else's afternoon.
+        flash(f"That is more than the {invoice.balance} outstanding on this invoice.", "error")
+        return redirect(url_for("resident.dashboard"))
+
+    try:
+        record_payment(
+            db.session,
+            org_id=org_id,
+            amount=amount,
+            method=PaymentMethod.ACH,
+            received_date=utcnow().date(),
+            lease_id=invoice.lease_id,
+            property_id=invoice.property_id,
+            reference=f"PORTAL-{invoice.invoice_number}",
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("resident.dashboard"))
+
+    flash(f"Payment of {amount} recorded against {invoice.invoice_number}.", "success")
+    return redirect(url_for("resident.dashboard"))
+
+
+@resident_bp.post("/requests", endpoint="raise_request")
+@login_required
+def resident_raise_request() -> Response:
+    """Report something broken without telephoning anybody."""
+    _require_user_type(UserType.RESIDENT)
+    require(Perm.REQUEST_CREATE)
+    org_id = require_org_scope()
+
+    from app.services.maintenance.service import create_request
+
+    title = (request.form.get("title") or "").strip()
+    description = (request.form.get("description") or "").strip()
+    if not title or not description:
+        flash("A request needs a summary and a description.", "error")
+        return redirect(url_for("resident.dashboard"))
+
+    lease_ids = _resident_lease_ids(org_id)
+    lease = (
+        db.session.execute(
+            select(Lease)
+            .where(Lease.id.in_(lease_ids), Lease.status == LeaseStatus.ACTIVE)
+            .limit(1)
+        ).scalar_one_or_none()
+        if lease_ids
+        else None
+    )
+    if lease is None:
+        flash("There is no active lease on your account to raise a request against.", "error")
+        return redirect(url_for("resident.dashboard"))
+
+    try:
+        created = create_request(
+            db.session,
+            org_id=org_id,
+            property_id=lease.property_id,
+            title=title[:200],
+            description=description[:4000],
+            unit_id=lease.unit_id,
+            resident_id=current_user.resident_id,
+            permission_to_enter=bool(request.form.get("permission_to_enter")),
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("resident.dashboard"))
+
+    flash(f"Request {created.request_number} raised. We will be in touch.", "success")
+    return redirect(url_for("resident.dashboard"))
+
+
+# ---------------------------------------------------------------------------
+# Owner: the statements the system can now generate
+# ---------------------------------------------------------------------------
+
+
+@owner_bp.get("/statements", endpoint="statements")
+@login_required
+def owner_statements() -> str:
+    """Every statement issued to this owner, newest first."""
+    _require_user_type(UserType.OWNER)
+    require(Perm.OWNER_STATEMENT_READ)
+    org_id = require_org_scope()
+
+    from app.models.accounting import OwnerStatement
+
+    statements = list(
+        db.session.execute(
+            select(OwnerStatement)
+            .where(
+                OwnerStatement.org_id == org_id,
+                OwnerStatement.owner_entity_id == current_user.owner_entity_id,
+            )
+            .order_by(OwnerStatement.period_end.desc())
+            .limit(48)
+        ).scalars()
+    )
+
+    properties = {
+        record.id: record
+        for record in db.session.execute(
+            select(Property).where(
+                Property.id.in_([statement.property_id for statement in statements] or [""])
+            )
+        ).scalars()
+    }
+
+    return render_template(
+        "portals/owner_statements.html", statements=statements, properties=properties
+    )
+
+
+@owner_bp.get("/statements/<statement_id>", endpoint="statement_detail")
+@login_required
+def owner_statement_detail(statement_id: str) -> str:
+    """One statement, with the arithmetic that produced it.
+
+    Ownership is checked on the *statement's* owner rather than by walking the
+    property, because a statement belongs to whoever it was issued to even if
+    the property has since changed hands - which is exactly the case temporal
+    apportionment exists for.
+    """
+    _require_user_type(UserType.OWNER)
+    require(Perm.OWNER_STATEMENT_READ)
+    org_id = require_org_scope()
+
+    from app.models.accounting import OwnerDistribution, OwnerStatement
+
+    statement = db.session.execute(
+        select(OwnerStatement).where(
+            OwnerStatement.id == statement_id,
+            OwnerStatement.org_id == org_id,
+            OwnerStatement.owner_entity_id == current_user.owner_entity_id,
+        )
+    ).scalar_one_or_none()
+    if statement is None:
+        abort(404)
+
+    distributions = list(
+        db.session.execute(
+            select(OwnerDistribution)
+            .where(
+                OwnerDistribution.org_id == org_id,
+                OwnerDistribution.owner_entity_id == statement.owner_entity_id,
+                OwnerDistribution.distribution_date >= statement.period_start,
+                OwnerDistribution.distribution_date <= statement.period_end,
+            )
+            .order_by(OwnerDistribution.distribution_date)
+        ).scalars()
+    )
+
+    return render_template(
+        "portals/owner_statement.html",
+        statement=statement,
+        property=db.session.get(Property, statement.property_id),
+        distributions=distributions,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Vendor: updating work from the field
+# ---------------------------------------------------------------------------
+
+#: What a vendor may do to their own job. Deliberately not the full state
+#: machine: cancelling work, reassigning it, and verifying it are the
+#: management company's decisions, not the contractor's.
+VENDOR_TRANSITIONS = ("accept", "start", "hold", "complete")
+
+
+@vendor_bp.post("/work-orders/<work_order_id>", endpoint="update_work_order")
+@login_required
+def vendor_update_work_order(work_order_id: str) -> Response:
+    """Accept, start, hold, or complete a job from a phone in a basement."""
+    _require_user_type(UserType.VENDOR)
+    require(Perm.WORK_ORDER_UPDATE)
+    org_id = require_org_scope()
+
+    from app.models.maintenance import WorkOrderStatus
+    from app.models.types import quantize_money
+    from app.services.maintenance.service import transition_work_order
+
+    if not current_user.vendor_id:
+        abort(404)
+
+    work_order = db.session.execute(
+        select(WorkOrder).where(
+            WorkOrder.id == work_order_id,
+            WorkOrder.org_id == org_id,
+            # The check that matters: their own job, or nothing.
+            WorkOrder.vendor_id == current_user.vendor_id,
+        )
+    ).scalar_one_or_none()
+    if work_order is None:
+        abort(404)
+
+    action = (request.form.get("action") or "").strip().lower()
+    if action not in VENDOR_TRANSITIONS:
+        flash("That is not something you can do to this job.", "error")
+        return redirect(url_for("vendor.dashboard"))
+
+    target = {
+        "accept": WorkOrderStatus.ASSIGNED,
+        "start": WorkOrderStatus.IN_PROGRESS,
+        "hold": WorkOrderStatus.ON_HOLD,
+        "complete": WorkOrderStatus.COMPLETED,
+    }[action]
+
+    note = (request.form.get("note") or "").strip()[:2000] or None
+    labor_cost = material_cost = None
+    if action == "complete":
+        # Completing without saying what it cost is how a job gets invoiced
+        # twice, from memory, three weeks later.
+        try:
+            labor_cost = quantize_money(Decimal(request.form.get("labor_cost") or "0"))
+            material_cost = quantize_money(Decimal(request.form.get("material_cost") or "0"))
+        except (ArithmeticError, ValueError):
+            flash("Labour and materials must be amounts.", "error")
+            return redirect(url_for("vendor.dashboard"))
+        if labor_cost < 0 or material_cost < 0:
+            flash("Costs cannot be negative.", "error")
+            return redirect(url_for("vendor.dashboard"))
+
+    try:
+        transition_work_order(
+            db.session,
+            work_order=work_order,
+            target=target,
+            actor_id=current_user.id,
+            actor_label=current_user.full_name,
+            note=note,
+            labor_cost=labor_cost,
+            material_cost=material_cost,
+            resolution_notes=note if action == "complete" else None,
+            # Residents see that work started and finished, not the costs.
+            resident_visible=action in ("start", "complete"),
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("vendor.dashboard"))
+
+    flash(f"{work_order.work_order_number} is now {work_order.status.value}.", "success")
+    return redirect(url_for("vendor.dashboard"))

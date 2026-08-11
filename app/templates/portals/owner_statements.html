@@ -1,0 +1,73 @@
+{# Statements issued to this owner. SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}Statements · {{ app_name }}{% endblock %}
+{% block heading %}Owner statements{% endblock %}
+
+{% block nav %}
+<div class="sidebar__group">
+  <div class="sidebar__label">Owner</div>
+  <a class="sidebar__link" href="{{ url_for('owner.dashboard') }}"
+     >Overview</a>
+  <a class="sidebar__link" href="{{ url_for('owner.statements') }}"
+     aria-current="page">Statements</a>
+</div>
+{% endblock %}
+
+{% block topbar_meta %}
+<a class="btn btn--sm" href="{{ url_for('owner.dashboard') }}">Overview</a>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Statements</h2>
+    <span class="panel__hint">{{ statements | length }} issued</span>
+  </div>
+
+  {% if statements %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Period</th><th>Property</th>
+            <th class="num">Income</th><th class="num">Expenses</th>
+            <th class="num">Fee</th><th class="num">Net</th>
+            <th class="num">Share</th><th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for statement in statements %}
+            <tr>
+              <td>
+                <a href="{{ url_for('owner.statement_detail', statement_id=statement.id) }}">
+                  {{ statement.period_start }} – {{ statement.period_end }}
+                </a>
+              </td>
+              <td>{{ properties[statement.property_id].name if statement.property_id in properties else '—' }}</td>
+              <td class="num">{{ statement.total_income | money }}</td>
+              <td class="num">{{ statement.total_expense | money }}</td>
+              <td class="num">{{ statement.management_fee | money }}</td>
+              <td class="num">{{ statement.net_income | money }}</td>
+              <td class="num">{{ (statement.ownership_percentage * 100) | round(2) }}%</td>
+              <td>
+                {% if statement.status == 'issued' %}
+                  <span class="pill pill--ok">Issued</span>
+                {% else %}
+                  <span class="pill pill--muted">{{ statement.status | capitalize }}</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No statements have been issued yet.</p>
+  {% endif %}
+</div>
+
+<p class="panel__note">
+  Where a property changed hands mid-period, each owner's statement covers only
+  the days they held it — the share column is days held, not a flat split.
+</p>
+{% endblock %}

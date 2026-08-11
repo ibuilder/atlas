@@ -1,0 +1,74 @@
+{# One statement, with the arithmetic that produced it. SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}Statement {{ statement.statement_number }} · {{ app_name }}{% endblock %}
+{% block heading %}Statement {{ statement.statement_number }}{% endblock %}
+
+{% block nav %}
+<div class="sidebar__group">
+  <div class="sidebar__label">Owner</div>
+  <a class="sidebar__link" href="{{ url_for('owner.dashboard') }}"
+     >Overview</a>
+  <a class="sidebar__link" href="{{ url_for('owner.statements') }}"
+     aria-current="page">Statements</a>
+</div>
+{% endblock %}
+
+{% block topbar_meta %}
+<a class="btn btn--sm" href="{{ url_for('owner.statements') }}">All statements</a>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ property.name if property else 'Property' }}</h2>
+    <span class="panel__hint">{{ statement.period_start }} – {{ statement.period_end }}</span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data">
+      <tbody>
+        <tr><td>Opening balance</td><td class="num">{{ statement.opening_balance | money }}</td></tr>
+        <tr><td>Income</td><td class="num">{{ statement.total_income | money }}</td></tr>
+        <tr><td>Operating expenses</td><td class="num">({{ statement.total_expense | money }})</td></tr>
+        <tr><td>Management fee</td><td class="num">({{ statement.management_fee | money }})</td></tr>
+        <tr class="total"><td><strong>Net income</strong></td><td class="num"><strong>{{ statement.net_income | money }}</strong></td></tr>
+        <tr><td>Distributed</td><td class="num">({{ statement.distribution_amount | money }})</td></tr>
+        <tr class="total"><td><strong>Closing balance</strong></td><td class="num"><strong>{{ statement.closing_balance | money }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="panel__note">
+    Your share of this period is <strong>{{ (statement.ownership_percentage * 100) | round(4) }}%</strong>,
+    computed from the days you held the property rather than from ownership on
+    the statement date. It is snapshotted here, so a later transfer does not
+    change what this statement says.
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Distributions</h2>
+    <span class="panel__hint">{{ distributions | length }} in this period</span>
+  </div>
+  {% if distributions %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Date</th><th>Reference</th><th>Method</th><th class="num">Amount</th></tr></thead>
+        <tbody>
+          {% for distribution in distributions %}
+            <tr>
+              <td>{{ distribution.distribution_date }}</td>
+              <td class="mono tiny">{{ distribution.reference or '—' }}</td>
+              <td>{{ distribution.method }}</td>
+              <td class="num">{{ distribution.amount | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No distributions were paid in this period.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -43,7 +43,7 @@
     {% if invoices %}
       <div class="table-wrap">
         <table class="data">
-          <thead><tr><th>Invoice</th><th>Due</th><th>Status</th><th class="num">Balance</th></tr></thead>
+          <thead><tr><th>Invoice</th><th>Due</th><th>Status</th><th class="num">Balance</th><th></th></tr></thead>
           <tbody>
             {% for invoice in invoices %}
               <tr>
@@ -51,6 +51,19 @@
                 <td class="tiny nowrap">{{ invoice.due_date | date }}</td>
                 <td>{{ invoice.status | status_pill }}</td>
                 <td class="num">{{ invoice.balance | money }}</td>
+                <td>
+                  <form method="post"
+                        action="{{ url_for('resident.pay_invoice', invoice_id=invoice.id) }}"
+                        class="row">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    {# Blank pays the balance, which is what almost everyone wants. #}
+                    <input type="text" name="amount" inputmode="decimal"
+                           placeholder="{{ invoice.balance }}"
+                           aria-label="Amount to pay against {{ invoice.invoice_number }}"
+                           style="max-width:8rem">
+                    <button class="btn btn--sm" type="submit">Pay</button>
+                  </form>
+                </td>
               </tr>
             {% endfor %}
           </tbody>
@@ -59,6 +72,30 @@
     {% else %}
       <p class="empty">You are all paid up.</p>
     {% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Report something</h2>
+    </div>
+    <form method="post" action="{{ url_for('resident.raise_request') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="request-title">What is wrong?</label>
+      <input id="request-title" name="title" required maxlength="200"
+             placeholder="No hot water in the bathroom">
+      <label for="request-description">Tell us more</label>
+      <textarea id="request-description" name="description" required rows="3"
+                placeholder="When it started, which room, anything you have already tried."></textarea>
+      <label class="row">
+        <input type="checkbox" name="permission_to_enter" value="1">
+        <span>You may enter if I am not home</span>
+      </label>
+      <p class="tiny dim">
+        Anything affecting heat, water, or safety is treated as urgent
+        automatically — you do not have to say so.
+      </p>
+      <button class="btn" type="submit">Send request</button>
+    </form>
   </section>
 
   <section class="panel">
