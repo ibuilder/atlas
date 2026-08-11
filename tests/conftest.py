@@ -1,9 +1,21 @@
 """Shared test fixtures.
 
-Each test gets a fresh in-memory schema. Slower than a shared database with
-rollbacks, and worth it: this suite asserts on tenant isolation and audit chain
-continuity, and both are exactly the properties that leak between tests when
-state is shared.
+Each test gets an empty database. The schema is built once per session and the
+*data* is cleared between tests, rather than the tables being created and
+dropped around every one.
+
+That distinction is worth stating, because the obvious version is what this
+used to do and it does not scale. Creating and dropping eighty-seven tables per
+test is nearly free on SQLite and punishing on PostgreSQL: every ``DROP TABLE``
+takes an ACCESS EXCLUSIVE lock, so teardown blocks behind any transaction a
+test left open, and the suite went from four minutes to twenty-five - close
+enough to a hang to be mistaken for one.
+
+Clearing data keeps the property the suite actually depends on. Tests here
+assert on tenant isolation and audit-chain continuity, so they must *really*
+commit; a shared-transaction-and-rollback scheme would make those assertions
+meaningless. A truncate between tests leaves commits real and the next test's
+database genuinely empty.
 
 Point ``DATABASE_URL`` at PostgreSQL to run the identical suite against the
 production dialect.
@@ -42,26 +54,66 @@ def app():
     with application.app_context():
         _db.session.remove()
         _db.session.configure(expire_on_commit=False)
-        yield application
+        # Once, not per test. See the module docstring.
+        _db.create_all()
+        try:
+            yield application
+        finally:
+            _db.session.rollback()
+            _db.session.remove()
+            _drop_all_ignoring_constraints()
 
 
 @pytest.fixture()
 def db(app):
-    """A fresh schema per test.
+    """An empty database per test.
 
-    Teardown rolls back and discards the session *before* dropping tables: a
+    Teardown rolls back and discards the session *before* clearing tables: a
     test that fails mid-flush leaves the session in a failed-transaction state,
-    and a ``drop_all`` issued on it would fail too - turning one real failure
-    into a cascade of unrelated ones.
+    and anything issued on it would fail too - turning one real failure into a
+    cascade of unrelated ones.
     """
-    _db.create_all()
     try:
         yield _db
     finally:
         _db.session.rollback()
         _db.session.remove()
-        _drop_all_ignoring_constraints()
+        _truncate_all()
         _db.session.remove()
+
+
+def _truncate_all() -> None:
+    """Empty every table, leaving the schema in place.
+
+    One statement on PostgreSQL rather than a DROP and CREATE per table. The
+    difference is not cosmetic: DDL there needs an ACCESS EXCLUSIVE lock on
+    every table, which is both slow and blocked by any transaction still open.
+    """
+    engine = _db.engine
+    tables = list(_db.metadata.sorted_tables)
+    if not tables:  # pragma: no cover - defensive
+        return
+
+    if engine.dialect.name == "postgresql":
+        names = ", ".join(f'"{table.name}"' for table in tables)
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                f"TRUNCATE TABLE {names} RESTART IDENTITY CASCADE"  # noqa: S608
+            )
+        return
+
+    with engine.begin() as connection:
+        if engine.dialect.name == "sqlite":
+            # Deleting in dependency order would work, but self-referencing rows
+            # - a journal entry pointing at the entry it reverses - leave no
+            # order that satisfies every constraint.
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        try:
+            for table in reversed(tables):
+                connection.execute(table.delete())
+        finally:
+            if engine.dialect.name == "sqlite":
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
 
 
 def _drop_all_ignoring_constraints() -> None:

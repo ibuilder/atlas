@@ -76,6 +76,12 @@ def rls_enabled(pg):
     with pg.engine.begin() as connection:
         for table in tenant_tables():
             connection.execute(text(f"ALTER TABLE {table.name} DISABLE ROW LEVEL SECURITY"))
+            # Dropped as well as disabled. The schema now outlives the test -
+            # it is built once per session - so a policy left behind is a
+            # policy the next test inherits.
+            connection.execute(
+                text(f"DROP POLICY IF EXISTS atlas_tenant_isolation ON {table.name}")
+            )
 
 
 def _fresh_transaction(db) -> None:  # noqa: ANN001
