@@ -63,6 +63,7 @@ dev = [
   "bandit>=1.7,<2",
   "pip-audit>=2.7,<3",
   "freezegun>=1.5,<2",
+  "pytest-timeout>=2.3,<3",
   "types-bleach",
   "types-python-dateutil",
   "signxml>=4.0,<5",
@@ -184,6 +185,11 @@ check_untyped_defs = false
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers --strict-config"
+#: A hung test otherwise holds a CI runner for the six-hour default. The point
+#: is not the limit - no honest test here takes a minute - it is that a hang
+#: fails with the name of the test that hung instead of a cancelled job.
+timeout = 60
+timeout_method = "thread"
 filterwarnings = ["error::DeprecationWarning:app.*"]
 markers = [
   "unit: fast isolated tests",
