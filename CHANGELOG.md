@@ -10,6 +10,22 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.0] - 2026-08-10
+
+Four milestones in one release. 0.2.0 through 0.4.0 were developed and merged
+but never separately tagged, so this is the first release since 0.1.0 and it
+contains all of them: closing the loop (0.2), automation (0.3), enterprise
+readiness (0.4), and asset intelligence (0.5).
+
+Every roadmap item through 0.5 is complete with its acceptance criteria met.
+Four conditions for 1.0 remain deliberately open in `ROADMAP.md` — a
+disaster-recovery drill executed rather than written, load testing, an
+independent penetration test, and a 90-day soak. Three need real hardware and
+elapsed time; the fourth needs somebody who did not write the code. None can be
+satisfied by writing more of it.
+
 ### Fixed
 
 - `score_match` in bank reconciliation read `JournalEntry.reference`, a field
@@ -292,17 +308,6 @@ codes and the `/api/v1` namespace are already treated as stable.
 - Scheduled jobs for all three, wired into the beat schedule and isolated
   per tenant: one organization's failure does not stop the sweep.
 
-### Planned
-- Webhook delivery loop (the outbox, signing, and backoff schedule are modelled;
-  the HTTP dispatcher is not yet implemented).
-- Accounts payable services: bill approval routing and disbursement.
-- Bank reconciliation workspace with matching suggestions.
-- Automation rule execution engine (the schema, dry-run flag, and run history
-  are modelled; the evaluator is not yet implemented).
-- Inspections and preventive-maintenance generation.
-- OIDC and SAML single sign-on.
-- Document storage adapters and the malware-scan pipeline.
-
 ## [0.1.0] - 2026-08-09
 
 The first release: an enterprise core that runs, migrates, and is tested.
@@ -392,5 +397,6 @@ The first release: an enterprise core that runs, migrates, and is tested.
 - Aggregate queries (`SELECT count(*)`) are scoped explicitly, closing a gap
   that ORM loader criteria alone do not cover.
 
-[Unreleased]: https://github.com/ibuilder/atlas/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ibuilder/atlas/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/ibuilder/atlas/compare/v0.1.0...v0.5.0
 [0.1.0]: https://github.com/ibuilder/atlas/releases/tag/v0.1.0

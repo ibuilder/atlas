@@ -360,7 +360,8 @@ docker compose up --build</pre>
     <div class="eyebrow">Status</div>
     <h2>What is built, and what is not.</h2>
     <p class="lede" style="margin-bottom:26px">
-      Version 0.1.0 is an enterprise core, not a finished platform. The full matrix is in
+      Version 0.5.0 completes every roadmap item through asset intelligence. It is not
+      1.0: four conditions remain open, and they are the ones code cannot satisfy. The full matrix is in
       <a href="https://github.com/ibuilder/atlas/blob/main/docs/FEATURES.md">FEATURES.md</a>;
       a roadmap that reads as a feature list is how a buyer discovers the gap during
       implementation.
@@ -368,12 +369,14 @@ docker compose up --build</pre>
     <table class="status">
       <thead><tr><th>Area</th><th>Status</th><th>Notes</th></tr></thead>
       <tbody>
-        <tr><td>Tenancy, audit, authorization</td><td><span class="st st-c">Complete</span></td><td class="muted">RLS migration still to land</td></tr>
-        <tr><td>Identity, MFA, sessions, API tokens</td><td><span class="st st-c">Complete</span></td><td class="muted">SSO is a defined seam</td></tr>
-        <tr><td>Double-entry ledger, AR, period close</td><td><span class="st st-c">Complete</span></td><td class="muted">AP and reconciliation are modelled</td></tr>
-        <tr><td>Maintenance intake, work orders, SLA</td><td><span class="st st-c">Complete</span></td><td class="muted">Inspections and PM are modelled</td></tr>
-        <tr><td>REST API, OpenAPI, admin console, portals</td><td><span class="st st-p">Partial</span></td><td class="muted">Read surfaces complete; some writes API-only</td></tr>
-        <tr><td>Documents, assets, automation, webhooks</td><td><span class="st st-m">Modelled</span></td><td class="muted">Schema and invariants; services pending</td></tr>
+        <tr><td>Tenancy, audit, authorization</td><td><span class="st st-c">Complete</span></td><td class="muted">Three layers including PostgreSQL row-level security</td></tr>
+        <tr><td>Identity, MFA, SSO, directory provisioning</td><td><span class="st st-c">Complete</span></td><td class="muted">OIDC with PKCE, SAML 2.0, SCIM</td></tr>
+        <tr><td>Ledger, AR, AP, reconciliation, close</td><td><span class="st st-c">Complete</span></td><td class="muted">Statements, recurring billing, delinquency</td></tr>
+        <tr><td>Maintenance, inspections, preventive work</td><td><span class="st st-c">Complete</span></td><td class="muted">Offline inspection replay is idempotent</td></tr>
+        <tr><td>Automation, approvals, webhooks, reporting</td><td><span class="st st-c">Complete</span></td><td class="muted">Dry run cannot mutate; conditions are data, not code</td></tr>
+        <tr><td>Documents, assets, capital planning, spaces</td><td><span class="st st-c">Complete</span></td><td class="muted">Extraction is a suggestion a person accepts</td></tr>
+        <tr><td>Leasing: applications, screening, renewals</td><td><span class="st st-m">Modelled</span></td><td class="muted">Schema and statutory deadlines; no workflow yet</td></tr>
+        <tr><td>Resident, owner, and vendor portals</td><td><span class="st st-p">Partial</span></td><td class="muted">Read surfaces complete; some writes API-only</td></tr>
       </tbody>
     </table>
   </div>
