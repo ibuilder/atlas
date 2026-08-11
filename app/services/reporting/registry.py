@@ -426,3 +426,82 @@ register(
         parameters={"horizon_years": 5, "inflation": None, "property_id": None, "as_of": None},
     )
 )
+
+
+# ---------------------------------------------------------------------------
+# Year-end and trust
+# ---------------------------------------------------------------------------
+
+
+def _tax_1099(session: Session, *, org_id: str, parameters: dict[str, Any]) -> list[dict]:
+    from app.services.accounting.tax import generate_1099_report, tax_report_rows
+
+    year = int(parameters.get("year") or (_as_of(parameters).year - 1))
+    return tax_report_rows(generate_1099_report(session, org_id=org_id, year=year))
+
+
+register(
+    ReportDefinition(
+        code="tax_1099",
+        name="1099 year-end totals",
+        description=(
+            "What each vendor was paid in a calendar year, on a cash basis. The status "
+            "column separates what can be filed from what is over the threshold and "
+            "blocked - a run that silently omits a vendor is the expensive kind."
+        ),
+        columns=[
+            "vendor",
+            "legal_name",
+            "tin_last4",
+            "payments",
+            "total_paid",
+            "status",
+            "backup_withholding",
+            "blockers",
+        ],
+        build=_tax_1099,
+        parameters={"year": None},
+    )
+)
+
+
+def _trust_position(session: Session, *, org_id: str, parameters: dict[str, Any]) -> list[dict]:
+    from app.models.accounting import BankAccount
+    from app.services.accounting.trust import reconcile_trust, trust_position_rows
+
+    rows: list[dict] = []
+    accounts = session.execute(
+        select(BankAccount).where(
+            BankAccount.org_id == org_id,
+            BankAccount.is_trust.is_(True),
+            BankAccount.deleted_at.is_(None),
+        )
+    ).scalars()
+
+    for account in accounts:
+        position = reconcile_trust(
+            session,
+            org_id=org_id,
+            bank_account_id=account.id,
+            as_of=_as_of(parameters),
+        )
+        for row in trust_position_rows(position):
+            rows.append({"account": account.name, **row})
+        for exception in position.exceptions:
+            rows.append({"account": account.name, "lease": "", "held": None, "status": exception})
+    return rows
+
+
+register(
+    ReportDefinition(
+        code="trust_position",
+        name="Trust three-way position",
+        description=(
+            "Bank against book against what every beneficiary is owed. The third leg "
+            "is the one that catches a shortfall while the first two agree."
+        ),
+        columns=["account", "lease", "held", "status"],
+        build=_trust_position,
+        parameters={"as_of": None},
+    )
+)

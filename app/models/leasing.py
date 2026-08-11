@@ -497,6 +497,8 @@ class LeaseRenewal(TenantModel):
     responded_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     response: Mapped[str | None] = mapped_column(String(20))
     declined_reason: Mapped[str | None] = mapped_column(String(255))
+    lease: Mapped[Lease] = relationship(foreign_keys=lambda: [LeaseRenewal.lease_id])
+
     new_lease_id: Mapped[str | None] = mapped_column(
         GUID, ForeignKey("leases.id", ondelete="SET NULL"), index=True
     )
@@ -506,8 +508,13 @@ class LeaseRenewal(TenantModel):
 
     @property
     def rent_increase(self) -> Decimal | None:
-        lease = self.lease if hasattr(self, "lease") else None
-        return None if lease is None else self.offered_rent - lease.rent_amount
+        """How much more than the current rent this offer asks.
+
+        Needs the relationship below to exist: reaching for ``self.lease``
+        through ``hasattr`` when nothing declared it meant this silently
+        returned ``None`` for every offer ever made.
+        """
+        return None if self.lease is None else self.offered_rent - self.lease.rent_amount
 
 
 class MoveOut(TenantModel):

@@ -57,9 +57,9 @@ feature list is how a buyer discovers the gap during implementation.
 | Capability | Status | Notes |
 |---|---|---|
 | Lead capture | **Complete** | API and speed-to-lead measurement. |
-| Applications and screening | **Modelled** | Schema captures decision factors and consent; no workflow or provider adapter. |
+| Applications and screening | **Complete** | Screening is refused without recorded consent, and the refusal is audited as CRITICAL. A denial without stated reasons is refused, because those reasons *are* the adverse-action notice. The criteria are snapshotted at the decision, so "why was this denied" answers against the thresholds in force then. Criminal history routes to individual assessment rather than declining automatically. The service recommends; a person decides. |
 | Lease creation and activation | **Complete** | Includes overlap prevention — a unit cannot be double-let. |
-| Renewals, move-outs, deposit disposition | **Modelled** | Schema encodes statutory deadlines; no workflow. |
+| Renewals, move-outs, deposit disposition | **Complete** | A renewal's terms are fixed when offered, so a resident accepts what they were offered rather than today's rent, and a lapsed offer cannot be honoured. The statutory disposition clock starts at the move-out and the deadline is *stored* rather than recomputed. Deductions need a description and an amount, come from inspection findings where there are any, and cannot exceed the deposit. A late disposition is audited as CRITICAL, because past the deadline the deductions are usually forfeit. |
 | E-sign | **Seam** | `esign_envelope_id` and a backend setting; no provider integration. |
 
 ## Accounting
@@ -74,11 +74,11 @@ feature list is how a buyer discovers the gap during implementation.
 | Period close and reopen | **Complete** | Approval-gated close; reopening demands a reason and audits as critical. |
 | Accounts payable | **Complete** | Bill recording with ledger posting, threshold-based approval routing, separation of duties enforced by identity, disbursement, and duplicate-invoice prevention. |
 | Bank reconciliation | **Complete** | Statement import is idempotent over overlapping windows - the bank's reference where there is one, otherwise a fingerprint with an occurrence index, so two genuinely identical fees both survive while a re-import adds neither. Match suggestions are ranked *and explained*; automatic matching takes only candidates that are both confident and unambiguous, leaving ties for a person. Completion is refused while the difference is non-zero, an exception is unresolved, or a transaction is neither matched nor deliberately ignored. Reopening is audited as CRITICAL. |
-| Trust accounting | **Partial** | Structural separation, flags, and constraints are enforced, and a trust account is refused as the source of an operating disbursement; no dedicated trust reconciliation yet. |
+| Trust accounting | **Complete** | Structural separation plus the **three-way reconciliation** a regulator actually asks for: bank against book against the sum of what every beneficiary is owed. The third leg is the one that matters - bank and book can agree perfectly while the trust is short, because the shortfall is between beneficiaries. Commingled operating activity is reported line by line, and a negative held balance is called an error rather than shown as a number. |
 | Owner statements and distributions | **Complete** | Ownership is resolved *temporally*: a property sold mid-period apportions by days held, so both owners are paid for the days they owned it. Management fee and reserve retention computed; distribution refuses to exceed available cash less reserve, or to draw on a trust account. |
 | Recurring charge generation | **Complete** | Monthly billing from lease charge schedules, idempotent by watermark, with day-accurate proration for partial first and last months. |
 | Delinquency and late fees | **Complete** | Staged escalation honouring each lease's grace period; a late fee is assessed once per stage, not once per run. |
-| 1099 / tax reporting | **Modelled** | `is_1099_reportable` flags present; no year-end export. |
+| 1099 / tax reporting | **Complete** | Cash-basis totals per vendor for a calendar year, with the threshold applied. A vendor over the threshold with no TIN, legal name, or address is **reported as blocked** rather than silently dropped - the omission is the expensive failure - with backup withholding computed. The export carries the last four digits only; a spreadsheet of TINs is a breach waiting to be emailed. |
 
 ## Maintenance
 
@@ -90,7 +90,7 @@ feature list is how a buyer discovers the gap during implementation.
 | Vendor dispatch with compliance gate | **Complete** | Refuses to assign work to a vendor whose insurance has lapsed. |
 | Inspections | **Complete** | The checklist is *copied* onto the inspection at scheduling, so a template edited afterwards cannot rewrite what a completed inspection appears to have asked. An item flagged `requires_photo` blocks sign-off without linked evidence - but only when the finding is not a clean pass, since photographing forty working light switches is how a checklist stops being filled in honestly. Failed items raise work orders, guarded by the item's own reference so one broken window is one job. Offline replay is idempotent by construction. |
 | Preventive maintenance | **Complete** | Work orders raise inside the schedule's lead time, idempotent by watermark. A missed gap generates once rather than once per cycle missed, and a seasonal schedule that comes due out of season is deferred to its window rather than raised or lost. Generation is deliberately not recorded as completion. |
-| Turn management | **Modelled** | Represented through work orders; no turn-specific templates. |
+| Turn management | **Partial** | Represented through work orders raised from move-out inspection findings, which is the substance of a turn; no turn-specific board or template. |
 
 ## Residents, owners, vendors
 

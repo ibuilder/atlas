@@ -54,6 +54,18 @@ from app.services.accounting.statements import (
     ownership_share,
     period_activity,
 )
+from app.services.accounting.tax import (
+    NEC_THRESHOLD,
+    TaxYearReport,
+    VendorTaxTotal,
+    generate_1099_report,
+    tax_report_rows,
+)
+from app.services.accounting.trust import (
+    BeneficiaryBalance,
+    TrustPosition,
+    reconcile_trust,
+)
 
 __all__ = [
     "AccountCode",
@@ -64,7 +76,15 @@ __all__ = [
     "apply_payment",
     "approve_bill",
     "close_period",
+    "BeneficiaryBalance",
     "ImportResult",
+    "NEC_THRESHOLD",
+    "TaxYearReport",
+    "TrustPosition",
+    "VendorTaxTotal",
+    "generate_1099_report",
+    "reconcile_trust",
+    "tax_report_rows",
     "MatchCandidate",
     "MatchStatus",
     "StatementLine",

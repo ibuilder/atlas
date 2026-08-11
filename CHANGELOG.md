@@ -10,7 +10,53 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **The three portals now write.** Residents pay an invoice and report a fault
+  from the portal rather than only through the API; owners read the statements
+  the system has been able to generate since 0.2; vendors accept, start, hold,
+  and complete a job with its costs entered on site. Every POST re-derives what
+  the caller owns and refuses anything outside it as a 404 - not 403, because
+  telling a resident an invoice exists but is not theirs turns the portal into
+  an enumerator. A permission check proves nothing here: every resident holds
+  `payment.record`.
+- **Applications and screening.** Screening is refused without recorded
+  consent, and the refusal is audited as CRITICAL - a consumer report pulled
+  without consent is a statutory violation, and the only place to prevent it
+  reliably is before the request. A denial without stated reasons is refused,
+  because those reasons *are* the adverse-action notice. The criteria are
+  snapshotted at the decision, so "why was this denied" answers against the
+  thresholds in force then. Criminal history routes to individual assessment
+  rather than declining automatically, because a blanket bar has been held to
+  violate fair-housing law. The service recommends; a person decides.
+- **Renewals, move-outs, and deposit disposition.** A renewal's terms are fixed
+  when it is offered, so a resident accepts what they were offered rather than
+  today's rent, and a lapsed offer cannot be honoured. The statutory
+  disposition clock starts at the move-out and the deadline is *stored*, not
+  recomputed - a recomputed deadline drifts every time somebody changes the
+  setting. Deductions need a description and an amount, come from inspection
+  findings where there are any, and cannot exceed the deposit. A late
+  disposition is audited as CRITICAL, because past the deadline the deductions
+  are usually forfeit.
+- **1099 year-end totals.** Cash basis, per vendor, with the threshold applied.
+  A vendor over the threshold with no TIN, legal name, or address is reported
+  as *blocked* rather than silently dropped - the omission is the expensive
+  failure, since the penalty is per form - with backup withholding computed.
+  The export carries the last four digits only.
+- **Trust three-way reconciliation.** Bank against book against the sum of what
+  every beneficiary is owed. The third leg is the one that matters: bank and
+  book can agree perfectly while the trust is short, because the shortfall is
+  between beneficiaries. Commingled operating activity is reported line by
+  line, and a negative held balance is called an error rather than shown as a
+  number.
+- Two new reports, `tax_1099` and `trust_position`, so both are deliverable
+  rather than merely callable.
+
+### Fixed
+
+- `LeaseRenewal.rent_increase` reached for a relationship that was never
+  declared, so `hasattr` was always false and it returned `None` for every
+  offer ever made. The relationship now exists and the property works.
 
 ## [0.5.0] - 2026-08-10
 
