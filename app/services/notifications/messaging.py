@@ -32,8 +32,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.errors import BusinessRuleViolation, NotFound, ValidationFailed
 from app.logging import get_logger
@@ -363,18 +364,24 @@ def threads_for_subject(
     )
 
 
-def _participant_thread_ids(
+def _owned_subjects(
     session: Session, *, org_id: str, participant: Participant
-) -> list[str] | None:
-    """The subject ids this participant owns, re-derived every call.
+) -> dict[str, list[str]]:
+    """What this participant owns, keyed by the subject type it anchors.
 
-    ``None`` means "this participant type sees nothing", which is different
-    from an empty list only in that it saves a query.
+    A mapping rather than a flat list, because the ids are not
+    interchangeable: an owner's leases are property ids and their own identity
+    is an owner id, and comparing one against the other silently matches
+    nothing. That is not a security failure - it fails closed - but it hides
+    the thread the office addressed to them, which they will describe as the
+    portal being broken.
+
+    Re-derived on every call. Nothing here is taken from the request.
     """
     if participant.resident_id:
         from app.models.resident import Tenancy
 
-        return [
+        leases = [
             row
             for row in session.execute(
                 select(Tenancy.lease_id).where(
@@ -383,11 +390,12 @@ def _participant_thread_ids(
                 )
             ).scalars()
         ]
+        return {"lease": leases}
 
     if participant.owner_entity_id:
         from app.models.org import OwnershipStake
 
-        return [
+        properties = [
             row
             for row in session.execute(
                 select(OwnershipStake.property_id).where(
@@ -396,11 +404,14 @@ def _participant_thread_ids(
                 )
             ).scalars()
         ]
+        # Their own identity is a subject in its own right: a thread about a
+        # distribution is about the owner, not about any one property.
+        return {"property": properties, "owner": [participant.owner_entity_id]}
 
     if participant.vendor_id:
         from app.models.maintenance import WorkOrder
 
-        return [
+        orders = [
             row
             for row in session.execute(
                 select(WorkOrder.id).where(
@@ -409,8 +420,9 @@ def _participant_thread_ids(
                 )
             ).scalars()
         ]
+        return {"work_order": orders, "vendor": [participant.vendor_id]}
 
-    return None
+    return {}
 
 
 def visible_threads(
@@ -422,8 +434,22 @@ def visible_threads(
     filter in a template is one refactor away from being dropped, and the
     failure mode is the office's private notes appearing in a resident's portal.
     """
-    owned = _participant_thread_ids(session, org_id=org_id, participant=participant)
-    if not owned:
+    owned = _owned_subjects(session, org_id=org_id, participant=participant)
+
+    # One clause per subject type, so each id is compared against ids of its own
+    # kind. A single flat list matches nothing across types and hides the thread.
+    reachable: list[ColumnElement[bool]] = [
+        (MessageThread.subject_type == subject_type) & MessageThread.subject_id.in_(ids)
+        for subject_type, ids in owned.items()
+        if ids
+    ]
+
+    if participant.resident_id:
+        # A thread addressed to the resident directly, which survives the end
+        # of their tenancy: a deposit dispute outlives the lease it concerns.
+        reachable.append(MessageThread.resident_id == participant.resident_id)
+
+    if not reachable:
         return []
 
     conditions = [
@@ -431,22 +457,8 @@ def visible_threads(
         MessageThread.deleted_at.is_(None),
         # Not negotiable, and not overridable by a caller.
         MessageThread.is_internal.is_(False),
+        or_(*reachable),
     ]
-
-    if participant.resident_id:
-        conditions.append(
-            (MessageThread.resident_id == participant.resident_id)
-            | (MessageThread.subject_type.in_(("lease",)) & MessageThread.subject_id.in_(owned))
-        )
-    elif participant.owner_entity_id:
-        conditions.append(
-            MessageThread.subject_type.in_(("property", "owner"))
-            & MessageThread.subject_id.in_(owned)
-        )
-    else:
-        conditions.append(
-            MessageThread.subject_type.in_(("work_order",)) & MessageThread.subject_id.in_(owned)
-        )
 
     return list(
         session.execute(

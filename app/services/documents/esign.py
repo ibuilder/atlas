@@ -384,6 +384,22 @@ def _complete(session: Session, *, envelope: SignatureEnvelope) -> SignatureEnve
         envelope.voided_reason = "The document changed after the envelope was sent."
         session.flush()
 
+        # Logged as well as audited, and deliberately before the raise. The void
+        # and the audit event below are in the caller's transaction, and this
+        # function raises - so a caller using ``transaction()`` rolls both back
+        # and the detection would leave no trace at all. The log is outside the
+        # database and survives regardless.
+        log.error(
+            "signature envelope voided: the document changed after it was sent",
+            extra={
+                "event": "esign.document_changed",
+                "envelope_id": envelope.id,
+                "reference": envelope.reference,
+                "sent_sha256": envelope.document_sha256,
+                "current_sha256": current,
+            },
+        )
+
         record_audit_event(
             action=AuditAction.ENVELOPE_VOIDED,
             resource_type="SignatureEnvelope",

@@ -420,3 +420,101 @@ def test_staff_see_internal_threads_on_a_subject(db, org, scope, lease_record):
     )
     assert len(everything) == 2
     assert [thread.title for thread in shared_only] == ["Shared"]
+
+
+def test_an_owner_sees_a_thread_addressed_to_them(db, org, scope, property_record):
+    """Not every owner thread is about a property.
+
+    An owner's own identity is a subject in its own right - a distribution
+    query is about them, not about any one building. Comparing an owner id
+    against the property ids they hold matches nothing, which fails closed but
+    hides the thread the office addressed to them.
+    """
+    from app.models.org import OwnerEntity, OwnerType
+    from app.services.portfolio.ownership import record_initial_stake
+
+    owner = OwnerEntity(
+        org_id=org.id, code="ALPHA", name="Alpha Holdings", owner_type=OwnerType.COMPANY
+    )
+    db.session.add(owner)
+    db.session.flush()
+    record_initial_stake(
+        db.session,
+        org_id=org.id,
+        property_id=property_record.id,
+        owner_entity_id=owner.id,
+        percentage=Decimal("100"),
+        effective_from=dt.date(2026, 1, 1),
+    )
+    addressed = open_thread(
+        db.session,
+        org_id=org.id,
+        title="Your March distribution",
+        subject_type="owner",
+        subject_id=owner.id,
+    )
+    db.session.commit()
+
+    threads = visible_threads(
+        db.session, org_id=org.id, participant=Participant(owner_entity_id=owner.id)
+    )
+    assert addressed.id in [thread.id for thread in threads]
+
+
+def test_an_owner_still_cannot_see_another_owners_thread(db, org, scope, property_record):
+    """The subject-typed lookup must not have widened the boundary."""
+    from app.models.org import OwnerEntity, OwnerType
+    from app.services.portfolio.ownership import record_initial_stake
+
+    mine = OwnerEntity(org_id=org.id, code="MINE", name="Mine", owner_type=OwnerType.COMPANY)
+    theirs = OwnerEntity(org_id=org.id, code="THEIRS", name="Theirs", owner_type=OwnerType.COMPANY)
+    db.session.add_all([mine, theirs])
+    db.session.flush()
+    record_initial_stake(
+        db.session,
+        org_id=org.id,
+        property_id=property_record.id,
+        owner_entity_id=mine.id,
+        percentage=Decimal("100"),
+        effective_from=dt.date(2026, 1, 1),
+    )
+    not_mine = open_thread(
+        db.session,
+        org_id=org.id,
+        title="Their distribution",
+        subject_type="owner",
+        subject_id=theirs.id,
+    )
+    db.session.commit()
+
+    threads = visible_threads(
+        db.session, org_id=org.id, participant=Participant(owner_entity_id=mine.id)
+    )
+    assert not_mine.id not in [thread.id for thread in threads]
+
+
+def test_a_resident_thread_survives_the_end_of_the_tenancy(db, org, scope, resident):
+    """A deposit dispute outlives the lease it concerns.
+
+    Threads addressed to the resident directly must not vanish the moment their
+    tenancy rows go, or the conversation about their deposit disappears exactly
+    when they need it.
+    """
+    from app.models.resident import Tenancy
+
+    direct = open_thread(
+        db.session,
+        org_id=org.id,
+        title="Your deposit disposition",
+        resident_id=resident.id,
+    )
+    db.session.commit()
+
+    for tenancy in db.session.query(Tenancy).all():
+        db.session.delete(tenancy)
+    db.session.commit()
+
+    threads = visible_threads(
+        db.session, org_id=org.id, participant=Participant(resident_id=resident.id)
+    )
+    assert [thread.id for thread in threads] == [direct.id]

@@ -133,6 +133,9 @@ def start_turn(
         started_on=started_on,
         target_ready_on=started_on + dt.timedelta(days=target_days),
         notes=notes,
+        # So a cancellation can put the unit back where it was rather than
+        # guessing, and stranding it in a status nothing will correct.
+        unit_status_before=str(unit.status),
     )
     session.add(turn)
     session.flush()
@@ -344,6 +347,18 @@ def cancel_turn(session: Session, *, turn: Turn, reason: str, actor_id: str | No
 
     turn.status = TurnStatus.CANCELLED
     turn.notes = f"{turn.notes}\n{text}" if turn.notes else text
+
+    # Put the unit back where the turn found it. Leaving it in TURN is worse
+    # than any wrong answer: nothing else sets that status, so the unit would
+    # never again read as occupied or lettable and no report would show it.
+    unit = session.get(Unit, turn.unit_id)
+    if unit is not None:
+        known = {status.value for status in UnitStatus}
+        unit.status = (
+            UnitStatus(turn.unit_status_before)
+            if turn.unit_status_before in known
+            else UnitStatus.VACANT_NOT_READY
+        )
     session.flush()
 
     record_audit_event(
@@ -351,7 +366,10 @@ def cancel_turn(session: Session, *, turn: Turn, reason: str, actor_id: str | No
         resource_type="Turn",
         resource_id=turn.id,
         severity=AuditSeverity.NOTICE,
-        payload={"cancelled": True},
+        payload={
+            "cancelled": True,
+            "unit_status_restored": str(unit.status) if unit is not None else None,
+        },
         reason=text[:255],
         org_id=turn.org_id,
         actor_id=actor_id,

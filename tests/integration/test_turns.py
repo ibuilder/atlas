@@ -425,3 +425,54 @@ def test_a_custom_template_is_honoured(db, org, scope, unit_record):
 
     assert [step.name for step in turn.steps] == ["Wipe down", "Photograph"]
     assert turn.target_ready_on == VACATED + dt.timedelta(days=3)
+
+
+def test_cancelling_puts_the_unit_back_where_it_was(db, org, scope, property_record):
+    """Leaving it in TURN is worse than any wrong answer.
+
+    Nothing else sets that status, so a unit stranded in it would never again
+    read as occupied or lettable and no report would show it.
+    """
+    from app.models.org import Unit
+
+    occupied = Unit(
+        org_id=org.id,
+        property_id=property_record.id,
+        unit_number="4D",
+        market_rent=Decimal("2300.00"),
+        status=UnitStatus.OCCUPIED,
+    )
+    db.session.add(occupied)
+    db.session.flush()
+
+    turn = start_turn(db.session, org_id=org.id, unit_id=occupied.id, started_on=VACATED)
+    db.session.commit()
+    assert occupied.status == UnitStatus.TURN
+
+    cancel_turn(db.session, turn=turn, reason="Resident withdrew notice.", actor_id=ACTOR)
+    db.session.commit()
+
+    assert occupied.status == UnitStatus.OCCUPIED
+
+
+def test_cancelling_falls_back_when_the_prior_status_is_unknown(db, org, scope, turn, unit_record):
+    """Turns opened before the column existed have nothing to restore."""
+    turn.unit_status_before = None
+    db.session.flush()
+
+    cancel_turn(db.session, turn=turn, reason="Coming off market.", actor_id=ACTOR)
+    db.session.commit()
+
+    assert unit_record.status == UnitStatus.VACANT_NOT_READY
+
+
+def test_the_cancellation_records_what_the_unit_went_back_to(db, org, scope, turn):
+    from app.models.audit import AuditEvent
+
+    cancel_turn(db.session, turn=turn, reason="Resident withdrew notice.", actor_id=ACTOR)
+    db.session.commit()
+
+    cancelled = [
+        event for event in db.session.query(AuditEvent).all() if event.payload.get("cancelled")
+    ]
+    assert cancelled[0].payload["unit_status_restored"] == str(UnitStatus.VACANT_READY)

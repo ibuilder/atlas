@@ -632,6 +632,13 @@ class Turn(TenantModel, SoftDeleteMixin):
     estimated_cost: Mapped[Decimal] = mapped_column(Money, nullable=False, default=Decimal("0"))
     notes: Mapped[str | None] = mapped_column(Text)
 
+    #: What the unit was before the turn took it. Recorded so a cancellation can
+    #: put it back: a turn that is abandoned because the resident withdrew
+    #: notice leaves an occupied unit, and one abandoned because the block is
+    #: coming off market leaves an off-market one. Guessing either way strands
+    #: the unit in a status nothing will ever correct.
+    unit_status_before: Mapped[str | None] = mapped_column(String(30))
+
     steps: Mapped[list[TurnStep]] = relationship(
         back_populates="turn",
         cascade="all, delete-orphan",
