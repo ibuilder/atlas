@@ -58,6 +58,9 @@ def seed_operations(
     summary["scheduled_reports"] = _seed_reports(organization, users)
     summary["identity_providers"] = _seed_sso(organization)
     summary["kpi_points"] = _seed_projections(organization)
+    summary["message_threads"] = _seed_messages(organization, properties, leases, users)
+    summary["turns"] = _seed_turns(organization, units, users)
+    summary["envelopes"] = _seed_esign(organization, leases, users)
 
     db.session.flush()
     return summary
@@ -768,3 +771,310 @@ def _seed_projections(organization) -> int:  # noqa: ANN001
         )
     db.session.flush()
     return points
+
+
+# ---------------------------------------------------------------------------
+# Messaging, turns, and a signed lease
+# ---------------------------------------------------------------------------
+
+
+def _seed_messages(organization, properties, leases, users) -> int:  # noqa: ANN001
+    """Conversations, including one the resident must never see.
+
+    The internal thread is the point of seeding this at all: a demo where every
+    thread is visible proves nothing about the rule that matters. Sign in as the
+    resident and it is absent; sign in as staff and it is there.
+    """
+    from sqlalchemy import select
+
+    from app.models.maintenance import WorkOrder
+    from app.models.org import OwnerEntity
+    from app.models.resident import CommunicationChannel, MessageDirection, Tenancy
+    from app.services.notifications.messaging import (
+        assign_thread,
+        open_thread,
+        post_message,
+        resolve_thread,
+        set_status,
+    )
+
+    manager = users["property_manager"]
+    lease = leases[0]
+    tenancy = (
+        db.session.execute(
+            select(Tenancy).where(Tenancy.org_id == organization.id, Tenancy.lease_id == lease.id)
+        )
+        .scalars()
+        .first()
+    )
+    resident_id = tenancy.resident_id if tenancy is not None else None
+
+    created = 0
+
+    # 1. An ordinary resident conversation, still open.
+    tap = open_thread(
+        current_session(),
+        org_id=organization.id,
+        title="Kitchen tap is dripping",
+        subject_type="lease",
+        subject_id=lease.id,
+        property_id=lease.property_id,
+        unit_id=lease.unit_id,
+        resident_id=resident_id,
+        actor_id=manager.id,
+    )
+    post_message(
+        current_session(),
+        thread=tap,
+        body="The kitchen mixer has been dripping since the weekend. It is getting worse.",
+        sender_label="Resident",
+        direction=MessageDirection.INBOUND,
+    )
+    post_message(
+        current_session(),
+        thread=tap,
+        body="Thanks for letting us know. A plumber can come Thursday morning - does that suit?",
+        sender_label=manager.full_name,
+        sender_user_id=manager.id,
+    )
+    assign_thread(current_session(), thread=tap, assignee_id=manager.id, actor_id=manager.id)
+    set_status(current_session(), thread=tap, status="pending", actor_id=manager.id)
+    created += 1
+
+    # 2. Internal, on the same lease. Never visible in the resident portal.
+    internal = open_thread(
+        current_session(),
+        org_id=organization.id,
+        title="Renewal approach for this tenancy",
+        subject_type="lease",
+        subject_id=lease.id,
+        resident_id=resident_id,
+        is_internal=True,
+        actor_id=manager.id,
+    )
+    post_message(
+        current_session(),
+        thread=internal,
+        body=(
+            "Good payer, no arrears in eighteen months. Recommend holding the "
+            "increase to 3% rather than the 5% the model suggests."
+        ),
+        sender_label=manager.full_name,
+        sender_user_id=manager.id,
+        direction=MessageDirection.INTERNAL,
+    )
+    created += 1
+
+    # 3. Addressed to the owner rather than to a property - which is the case
+    #    that used to be invisible to them.
+    owner = (
+        db.session.execute(select(OwnerEntity).where(OwnerEntity.org_id == organization.id))
+        .scalars()
+        .first()
+    )
+    if owner is not None:
+        distribution = open_thread(
+            current_session(),
+            org_id=organization.id,
+            title="Your distribution timing",
+            subject_type="owner",
+            subject_id=owner.id,
+            actor_id=manager.id,
+        )
+        post_message(
+            current_session(),
+            thread=distribution,
+            body="Distributions now clear on the 5th rather than the 8th. Nothing else changes.",
+            sender_label=users["controller"].full_name,
+            sender_user_id=users["controller"].id,
+            channel=CommunicationChannel.EMAIL,
+        )
+        created += 1
+
+    # 4. A vendor thread on their own job, resolved.
+    order = (
+        db.session.execute(
+            select(WorkOrder).where(
+                WorkOrder.org_id == organization.id, WorkOrder.vendor_id.is_not(None)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if order is not None:
+        access = open_thread(
+            current_session(),
+            org_id=organization.id,
+            title=f"Access for {order.work_order_number}",
+            subject_type="work_order",
+            subject_id=order.id,
+            actor_id=manager.id,
+        )
+        post_message(
+            current_session(),
+            thread=access,
+            body="Key safe code is on the job. Resident works from home Tuesdays.",
+            sender_label=manager.full_name,
+            sender_user_id=manager.id,
+        )
+        post_message(
+            current_session(),
+            thread=access,
+            body="Understood - we will attend Tuesday.",
+            sender_label="Apex Mechanical",
+            direction=MessageDirection.INBOUND,
+        )
+        resolve_thread(current_session(), thread=access, actor_id=manager.id)
+        created += 1
+
+    db.session.flush()
+    return created
+
+
+def _seed_turns(organization, units, users) -> int:  # noqa: ANN001
+    """One turn finished, one still running.
+
+    A finished one so the board has a days-vacant figure to average, and a
+    running one so the board has something on it. The running one keeps a
+    required step outstanding, so the refusal is demonstrable rather than
+    described.
+    """
+    from app.models.org import UnitStatus
+    from app.services.leasing.turns import complete_step, mark_ready, skip_step, start_turn
+
+    manager = users["property_manager"]
+    candidates = [
+        unit
+        for unit in units
+        if unit.org_id == organization.id
+        and unit.status in (UnitStatus.VACANT_READY, UnitStatus.VACANT_NOT_READY)
+    ][:2]
+    if len(candidates) < 2:
+        return 0
+
+    # Finished eleven days after the keys came back, with one step skipped and
+    # a reason on the record.
+    finished = start_turn(
+        current_session(),
+        org_id=organization.id,
+        unit_id=candidates[0].id,
+        started_on=TODAY - dt.timedelta(days=40),
+        actor_id=manager.id,
+    )
+    for step in finished.steps:
+        if not step.is_required:
+            continue
+        if step.name == "Flooring clean or replace":
+            skip_step(
+                current_session(),
+                step=step,
+                reason="Vinyl laid last year; cleaned rather than replaced.",
+                actor_id=manager.id,
+            )
+        else:
+            complete_step(current_session(), step=step, actor_id=manager.id)
+    mark_ready(
+        current_session(),
+        turn=finished,
+        ready_on=TODAY - dt.timedelta(days=29),
+        actor_id=manager.id,
+    )
+
+    # Still running, and past its target, so the board shows what late looks like.
+    running = start_turn(
+        current_session(),
+        org_id=organization.id,
+        unit_id=candidates[1].id,
+        started_on=TODAY - dt.timedelta(days=18),
+        actor_id=manager.id,
+    )
+    for step in running.steps[:3]:
+        complete_step(current_session(), step=step, actor_id=manager.id)
+
+    db.session.flush()
+    return 2
+
+
+def _seed_esign(organization, leases, users) -> int:  # noqa: ANN001
+    """A lease executed electronically, with the consent record behind it."""
+    from sqlalchemy import select
+
+    from app.models.documents import Document, DocumentCategory, ScanStatus
+    from app.models.resident import Resident, Tenancy
+    from app.services.documents.esign import (
+        SignerInput,
+        create_envelope,
+        record_signature,
+        send_envelope,
+        sha256_of,
+    )
+
+    lease = leases[0]
+    tenancy = (
+        db.session.execute(
+            select(Tenancy).where(Tenancy.org_id == organization.id, Tenancy.lease_id == lease.id)
+        )
+        .scalars()
+        .first()
+    )
+    if tenancy is None:
+        return 0
+    resident = db.session.get(Resident, tenancy.resident_id)
+    if resident is None or not resident.email:
+        return 0
+
+    # A stand-in for the rendered agreement. The digest is of real bytes, so the
+    # artifact check the envelope performs is checking something.
+    body = (
+        f"RESIDENTIAL TENANCY AGREEMENT\n"
+        f"Lease {lease.lease_number}\n"
+        f"Term {lease.start_date} to {lease.end_date}\n"
+        f"Rent {lease.rent_amount} per month\n"
+    ).encode()
+
+    document = Document(
+        org_id=organization.id,
+        name=f"Lease agreement {lease.lease_number}",
+        original_filename=f"{lease.lease_number}.txt",
+        storage_key=f"documents/demo/{lease.lease_number}.txt",
+        content_type="text/plain",
+        size_bytes=len(body),
+        checksum_sha256=sha256_of(body),
+        category=DocumentCategory.LEASE,
+        scan_status=ScanStatus.CLEAN,
+    )
+    db.session.add(document)
+    db.session.flush()
+
+    manager = users["property_manager"]
+    envelope = create_envelope(
+        current_session(),
+        org_id=organization.id,
+        document_id=document.id,
+        title=f"Lease agreement {lease.lease_number}",
+        reference=f"ENV-{lease.lease_number}",
+        signers=[
+            SignerInput(name=resident.full_name, email=resident.email, role="resident"),
+            SignerInput(name=manager.full_name, email=manager.email, role="landlord"),
+        ],
+        subject_type="lease",
+        subject_id=lease.id,
+        actor_id=manager.id,
+    )
+    send_envelope(current_session(), envelope=envelope, actor_id=manager.id)
+
+    for name, address in (
+        (resident.full_name, resident.email),
+        (manager.full_name, manager.email),
+    ):
+        record_signature(
+            current_session(),
+            envelope=envelope,
+            email=address,
+            typed_name=name,
+            ip_address="203.0.113.42",
+            user_agent="Mozilla/5.0 (demo portal)",
+        )
+
+    db.session.flush()
+    return 1

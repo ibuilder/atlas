@@ -104,6 +104,12 @@ def seed_demo(slug: str, force: bool) -> None:
         f"  SSO          : {operations['identity_providers']} provider configured (inactive)"
     )
     click.echo(f"  KPI history  : {operations['kpi_points']} snapshots over 15 days")
+    click.echo(
+        f"  Messages     : {operations['message_threads']} threads (one internal, "
+        "invisible in the portal)"
+    )
+    click.echo(f"  Turns        : {operations['turns']} (one finished, one running late)")
+    click.echo(f"  E-signature  : {operations['envelopes']} lease executed by every party")
     _print_credentials(slug)
 
 
