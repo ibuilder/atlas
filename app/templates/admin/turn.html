@@ -1,0 +1,78 @@
+{# One turn, step by step.
+
+   A skipped step shows its reason: "why was this unit let without a re-key" is
+   asked afterwards, not before.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Turn · {{ app_name }}{% endblock %}
+{% block heading %}
+  Turn — {{ unit.unit_number if unit else turn.unit_id }}
+{% endblock %}
+{% block nav %}{{ admin_nav('turns') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if turn.days_vacant is not none %}
+  <span class="integrity"><span class="integrity__dot"></span>
+    {{ turn.days_vacant }} days vacant</span>
+{% elif turn.target_ready_on and today > turn.target_ready_on %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span>
+    {{ (today - turn.target_ready_on).days }} days past target</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ turn.status | humanize }}</h2>
+    <span class="panel__hint">
+      Vacated {{ turn.started_on.isoformat() }}
+      {%- if turn.target_ready_on %} · target {{ turn.target_ready_on.isoformat() }}{% endif %}
+      {%- if turn.ready_on %} · ready {{ turn.ready_on.isoformat() }}{% endif %}
+    </span>
+  </div>
+
+  {% if outstanding %}
+    <p class="empty">
+      {{ outstanding | length }} required step(s) outstanding. The unit cannot be
+      marked ready until each is done or deliberately skipped with a reason.
+    </p>
+  {% endif %}
+
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>#</th><th>Step</th><th>Trade</th><th>Required</th><th>Status</th><th>Note</th></tr>
+      </thead>
+      <tbody>
+        {% for step in turn.steps %}
+          <tr>
+            <td class="num tiny muted">{{ step.sequence }}</td>
+            <td>{{ step.name }}</td>
+            <td class="tiny muted">{{ step.trade | humanize if step.trade else '—' }}</td>
+            <td class="tiny">{{ 'Yes' if step.is_required else 'Optional' }}</td>
+            <td class="tiny">
+              {% if step.skip_reason %}
+                <span class="pill">Skipped</span>
+              {% else %}
+                {{ step.status | humanize }}
+              {% endif %}
+            </td>
+            <td class="tiny muted">{{ step.skip_reason or '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if turn.notes %}
+<div class="panel">
+  <div class="panel__head"><h2 class="panel__title">Notes</h2></div>
+  <p>{{ turn.notes }}</p>
+</div>
+{% endif %}
+
+<p class="tiny"><a href="{{ url_for('admin.turns') }}">Back to the board</a></p>
+{% endblock %}

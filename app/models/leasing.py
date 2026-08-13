@@ -41,6 +41,10 @@ if TYPE_CHECKING:
     from app.models.resident import Tenancy
 
 __all__ = [
+    "StepStatus",
+    "Turn",
+    "TurnStatus",
+    "TurnStep",
     "Applicant",
     "ApplicantRole",
     "Application",
@@ -560,3 +564,129 @@ class MoveOut(TenantModel):
     statement_document_id: Mapped[str | None] = mapped_column(
         GUID, ForeignKey("documents.id", ondelete="SET NULL"), index=True
     )
+
+
+# ---------------------------------------------------------------------------
+# Turns: the gap between one tenancy and the next
+# ---------------------------------------------------------------------------
+
+
+class TurnStatus(StrEnum):
+    """Where a unit is between tenancies."""
+
+    SCHEDULED = "scheduled"
+    IN_PROGRESS = "in_progress"
+    READY = "ready"
+    CANCELLED = "cancelled"
+
+
+class StepStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+    #: Deliberately not done, with a reason. Different from pending, which is
+    #: "not yet"; a skipped step is a decision somebody made and is answerable
+    #: for.
+    SKIPPED = "skipped"
+
+
+class Turn(TenantModel, SoftDeleteMixin):
+    """One unit's journey from vacated to rent-ready.
+
+    The metric this exists to produce is *days vacant*, which is the largest
+    controllable cost in residential management and the one nobody can quote
+    without a record like this. Work orders alone cannot answer it: they say
+    what was done, not when the unit stopped earning and started again.
+    """
+
+    __tablename__ = "turns"
+    __table_args__ = (
+        CheckConstraint(
+            "ready_on IS NULL OR started_on IS NULL OR ready_on >= started_on",
+            name="ready_after_start",
+        ),
+        Index("ix_turns_org_status", "org_id", "status"),
+        Index("ix_turns_org_created", "org_id", "created_at"),
+    )
+
+    unit_id: Mapped[str] = mapped_column(
+        GUID, ForeignKey("units.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    property_id: Mapped[str] = mapped_column(
+        GUID, ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    move_out_id: Mapped[str | None] = mapped_column(
+        GUID, ForeignKey("move_outs.id", ondelete="SET NULL"), index=True
+    )
+
+    status: Mapped[TurnStatus] = mapped_column(
+        enum_column(TurnStatus), nullable=False, default=TurnStatus.SCHEDULED, index=True
+    )
+    #: The day the unit came back, which starts the clock.
+    started_on: Mapped[dt.date] = mapped_column(Date, nullable=False, index=True)
+    #: What was promised. Kept separate from ``ready_on`` so the two can differ
+    #: and the difference can be reported on.
+    target_ready_on: Mapped[dt.date | None] = mapped_column(Date, index=True)
+    ready_on: Mapped[dt.date | None] = mapped_column(Date, index=True)
+
+    estimated_cost: Mapped[Decimal] = mapped_column(Money, nullable=False, default=Decimal("0"))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+    steps: Mapped[list[TurnStep]] = relationship(
+        back_populates="turn",
+        cascade="all, delete-orphan",
+        order_by="TurnStep.sequence",
+        passive_deletes=True,
+    )
+
+    @property
+    def days_vacant(self) -> int | None:
+        """Days from vacated to ready. ``None`` while still turning."""
+        if self.ready_on is None:
+            return None
+        return (self.ready_on - self.started_on).days
+
+    @property
+    def is_overdue(self) -> bool:
+        return (
+            self.ready_on is None
+            and self.target_ready_on is not None
+            and self.status not in (TurnStatus.READY, TurnStatus.CANCELLED)
+        )
+
+
+class TurnStep(TenantModel):
+    """One task in a turn, optionally carried out through a work order.
+
+    Steps are records rather than a checklist in a notes field because a turn
+    that stalled needs to say *which* step it stalled on, and because "was the
+    smoke alarm tested" is a question somebody eventually asks under oath.
+    """
+
+    __tablename__ = "turn_steps"
+    __table_args__ = (
+        UniqueConstraint("turn_id", "sequence", name="uq_turn_steps_sequence"),
+        Index("ix_turn_steps_org_created", "org_id", "created_at"),
+    )
+
+    turn_id: Mapped[str] = mapped_column(
+        GUID, ForeignKey("turns.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    trade: Mapped[str | None] = mapped_column(String(60))
+    #: A turn cannot be called ready while a required step is outstanding. A
+    #: unit marketed as ready that is not is a cancelled move-in.
+    is_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+    status: Mapped[StepStatus] = mapped_column(
+        enum_column(StepStatus), nullable=False, default=StepStatus.PENDING, index=True
+    )
+    work_order_id: Mapped[str | None] = mapped_column(
+        GUID, ForeignKey("work_orders.id", ondelete="SET NULL"), index=True
+    )
+    completed_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    completed_by_id: Mapped[str | None] = mapped_column(GUID)
+    skip_reason: Mapped[str | None] = mapped_column(String(255))
+
+    turn: Mapped[Turn] = relationship(back_populates="steps")

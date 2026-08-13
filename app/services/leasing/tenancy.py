@@ -321,6 +321,8 @@ def record_move_out(
     forwarding_address: dict | None = None,
     disposition_days: int = DEFAULT_DISPOSITION_DAYS,
     inspection_id: str | None = None,
+    start_turn_on_vacancy: bool = True,
+    actor_id: str | None = None,
 ) -> MoveOut:
     """Record that they actually left, and start the statutory clock.
 
@@ -346,6 +348,22 @@ def record_move_out(
     if lease is not None and lease.status in (LeaseStatus.ACTIVE, LeaseStatus.HOLDOVER):
         lease.status = LeaseStatus.TERMINATED
         session.flush()
+
+    # The vacancy clock starts the day the keys come back, not the day somebody
+    # remembers to open a turn. Starting it here is what makes days-vacant a
+    # measurement rather than an estimate.
+    if start_turn_on_vacancy and lease is not None and lease.unit_id:
+        from app.services.leasing.turns import start_turn, turn_for_unit
+
+        if turn_for_unit(session, org_id=move_out.org_id, unit_id=lease.unit_id) is None:
+            start_turn(
+                session,
+                org_id=move_out.org_id,
+                unit_id=lease.unit_id,
+                started_on=actual_date,
+                move_out=move_out,
+                actor_id=actor_id,
+            )
 
     if not move_out.forwarding_address:
         # Not a refusal - people leave without giving one - but it is the reason

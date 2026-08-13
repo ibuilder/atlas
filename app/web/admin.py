@@ -383,6 +383,66 @@ def ownership() -> str:
     return render_template("admin/ownership.html", rows=rows, as_of=as_of)
 
 
+@admin_bp.get("/turns")
+@login_required
+def turns() -> str:
+    """The turn board: what is vacant, what is late, and the days it is costing.
+
+    Days vacant is the number this page exists to move. It is shown for
+    completed turns rather than estimated for open ones, because an average
+    that includes turns still running flatters itself as they get worse.
+    """
+    require(Perm.UNIT_READ)
+    org_id = require_org_scope()
+
+    from app.services.leasing.turns import turn_board
+
+    property_id = (request.args.get("property_id") or "").strip() or None
+    board = turn_board(current_session(), org_id=org_id, property_id=property_id)
+
+    units = {
+        unit.id: unit
+        for unit in db.session.execute(select(Unit).where(Unit.org_id == org_id)).scalars()
+    }
+    properties = list(
+        db.session.execute(
+            select(Property).where(Property.org_id == org_id).order_by(Property.name)
+        ).scalars()
+    )
+
+    return render_template(
+        "admin/turns.html",
+        board=board,
+        units=units,
+        properties=properties,
+        property_id=property_id,
+        today=utcnow().date(),
+    )
+
+
+@admin_bp.get("/turns/<id:turn_id>")
+@login_required
+def turn_detail(turn_id: str) -> str:
+    """One turn and its steps, in the order they are meant to happen."""
+    require(Perm.UNIT_READ)
+    org_id = require_org_scope()
+
+    from app.models.leasing import Turn
+    from app.services.leasing.turns import outstanding_steps
+
+    turn = db.session.get(Turn, turn_id)
+    if turn is None or turn.org_id != org_id or turn.deleted_at is not None:
+        abort(404)
+
+    return render_template(
+        "admin/turn.html",
+        turn=turn,
+        unit=db.session.get(Unit, turn.unit_id),
+        outstanding=outstanding_steps(turn),
+        today=utcnow().date(),
+    )
+
+
 @admin_bp.get("/messages")
 @login_required
 def messages() -> str:
