@@ -38,6 +38,8 @@ from app.models.types import GUID, JSONType, UTCDateTime, enum_column, utcnow
 
 __all__ = [
     "Document",
+    "EnvelopeSigner",
+    "EnvelopeStatus",
     "DocumentCategory",
     "DocumentLink",
     "DocumentShare",
@@ -45,6 +47,8 @@ __all__ = [
     "OcrStatus",
     "RetentionClass",
     "ScanStatus",
+    "SignatureEnvelope",
+    "SignerStatus",
 ]
 
 
@@ -278,3 +282,136 @@ class DocumentShare(TenantModel):
         if self.revoked_at is not None or self.expires_at <= utcnow():
             return False
         return self.max_downloads is None or self.download_count < self.max_downloads
+
+
+# ---------------------------------------------------------------------------
+# Electronic signature
+# ---------------------------------------------------------------------------
+
+
+class EnvelopeStatus(StrEnum):
+    """Where an envelope is in its life."""
+
+    DRAFT = "draft"
+    SENT = "sent"
+    #: At least one signature, but not all of them.
+    PARTIALLY_SIGNED = "partially_signed"
+    COMPLETED = "completed"
+    DECLINED = "declined"
+    VOIDED = "voided"
+    EXPIRED = "expired"
+
+
+class SignerStatus(StrEnum):
+    PENDING = "pending"
+    SIGNED = "signed"
+    DECLINED = "declined"
+
+
+class SignatureEnvelope(TenantModel, SoftDeleteMixin):
+    """A document out for signature, and what it is a signature *on*.
+
+    ``document_sha256`` is the point of the record. An electronic signature is
+    evidence only if the artifact it was applied to can be shown to be the one
+    still on file - otherwise "they signed it" and "they signed *this*" are
+    different claims and only the weaker one is provable. The digest is captured
+    when the envelope is sent and re-checked at completion, so a document
+    swapped underneath an envelope fails loudly instead of silently inheriting
+    somebody's consent.
+    """
+
+    __tablename__ = "signature_envelopes"
+    __table_args__ = (
+        UniqueConstraint("org_id", "reference", name="uq_signature_envelopes_reference"),
+        Index("ix_signature_envelopes_org_status", "org_id", "status"),
+        Index("ix_signature_envelopes_subject", "org_id", "subject_type", "subject_id"),
+        Index("ix_signature_envelopes_org_created", "org_id", "created_at"),
+    )
+
+    #: Human-facing identifier, and the idempotency key a provider echoes back.
+    reference: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    document_id: Mapped[str] = mapped_column(
+        GUID, ForeignKey("documents.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    #: The digest of the document as it was when the envelope was sent.
+    document_sha256: Mapped[str | None] = mapped_column(String(64))
+
+    #: What the signature is about: ``lease``, ``application``, ``vendor``.
+    subject_type: Mapped[str | None] = mapped_column(String(40), index=True)
+    subject_id: Mapped[str | None] = mapped_column(GUID, index=True)
+
+    status: Mapped[EnvelopeStatus] = mapped_column(
+        enum_column(EnvelopeStatus), nullable=False, default=EnvelopeStatus.DRAFT, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(30), nullable=False, default="internal")
+    #: The provider's own identifier, where there is one.
+    external_id: Mapped[str | None] = mapped_column(String(120), index=True)
+
+    sent_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    completed_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    expires_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime, index=True)
+    voided_reason: Mapped[str | None] = mapped_column(String(255))
+
+    signers: Mapped[list[EnvelopeSigner]] = relationship(
+        back_populates="envelope",
+        cascade="all, delete-orphan",
+        order_by="EnvelopeSigner.sequence",
+        passive_deletes=True,
+    )
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in (
+            EnvelopeStatus.COMPLETED,
+            EnvelopeStatus.DECLINED,
+            EnvelopeStatus.VOIDED,
+            EnvelopeStatus.EXPIRED,
+        )
+
+    @property
+    def outstanding_signers(self) -> list[EnvelopeSigner]:
+        return [s for s in self.signers if s.status == SignerStatus.PENDING]
+
+
+class EnvelopeSigner(TenantModel):
+    """One party to an envelope, and the evidence of their signature.
+
+    The consent record - what they were shown, from where, and when - is stored
+    alongside the signature rather than derived later. Under most electronic
+    signature statutes the enforceability of a signature rests on being able to
+    produce exactly that, and it cannot be reconstructed after the fact.
+    """
+
+    __tablename__ = "envelope_signers"
+    __table_args__ = (
+        UniqueConstraint("envelope_id", "sequence", name="uq_envelope_signers_sequence"),
+        Index("ix_envelope_signers_org_created", "org_id", "created_at"),
+    )
+
+    envelope_id: Mapped[str] = mapped_column(
+        GUID, ForeignKey("signature_envelopes.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    #: Signing order. Equal sequences would be ambiguous, so they are unique.
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    role: Mapped[str | None] = mapped_column(String(60))
+
+    status: Mapped[SignerStatus] = mapped_column(
+        enum_column(SignerStatus), nullable=False, default=SignerStatus.PENDING, index=True
+    )
+    signed_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    declined_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    decline_reason: Mapped[str | None] = mapped_column(String(255))
+
+    #: Consent evidence. Not decorative: this is what makes the signature
+    #: enforceable, and it cannot be reconstructed afterwards.
+    signed_ip: Mapped[str | None] = mapped_column(String(45))
+    signed_user_agent: Mapped[str | None] = mapped_column(String(255))
+    #: What they typed, for a typed-name signature.
+    typed_name: Mapped[str | None] = mapped_column(String(150))
+    consent_text: Mapped[str | None] = mapped_column(Text)
+
+    envelope: Mapped[SignatureEnvelope] = relationship(back_populates="signers")

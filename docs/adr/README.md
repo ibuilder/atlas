@@ -12,6 +12,7 @@ what would make us revisit it. A decision without a stated cost is advocacy.
 | [0005](#adr-0005) | Document and asset graphs as the strategic differentiator | Accepted |
 | [0006](#adr-0006) | AI deferred behind governance controls | Accepted |
 | [0007](#adr-0007) | Automation rules are data, and dry run is structural | Accepted |
+| [0008](#adr-0008) | Typed-name e-signature, with the artifact pinned | Accepted |
 
 ---
 
@@ -179,3 +180,59 @@ pattern is a denial of service that looks like a typo.
 then is more operators, each with bounded cost — not a general expression
 language.
 
+
+
+---
+
+## ADR-0008 — Typed-name e-signature, with the artifact pinned {#adr-0008}
+
+**Context.** A lease has to be signed. The options are to integrate a signature
+provider (DocuSign, Dropbox Sign), to implement certificate-backed digital
+signatures, or to capture signature *in* Atlas and keep the evidence ourselves.
+
+The first cannot be the only option: it puts a per-envelope cost and a
+third-party dependency in the path of the most ordinary thing a management
+company does, and small operators will not pay it. The second is a different
+product — issuing and validating certificates is a trust business, not a
+property one.
+
+What actually determines whether a signature stands up is narrower than any of
+those choices, and it is the same in all three: can you produce evidence of who
+signed, when, from where, what they were shown, and that the document on file is
+the document they saw. Statutes in the ESIGN/UETA family, and eIDAS at the
+"simple electronic signature" level, ask for that record rather than for
+cryptography.
+
+**Decision.** Implement the envelope *lifecycle* in Atlas behind a provider
+adapter, with a working built-in provider that captures a typed-name signature
+plus a consent record — typed name, IP address, user agent, timestamp, and the
+consent wording shown at the time.
+
+Pin the artifact: the document's SHA-256 is captured when the envelope is sent
+and re-checked before it completes. If it differs, the envelope voids and the
+completion is refused.
+
+Call it what it is. The built-in provider produces a simple electronic
+signature, not an advanced or qualified one, and says so.
+
+**Consequences.** The evidence a dispute actually turns on is captured at the
+moment and cannot be reconstructed afterwards, which is the failure mode of
+bolting this on later. "They signed it" and "they signed *this*" stop being
+different claims, because a document swapped underneath an open envelope fails
+loudly instead of quietly inheriting somebody's consent — the one attack this
+design specifically defeats.
+
+The costs. A typed-name signature carries less weight than a
+certificate-backed one where an adversary disputes identity rather than intent;
+Atlas mitigates identity with portal authentication, which is weaker than
+government-ID verification and should not be described otherwise. Jurisdictions
+requiring a qualified signature for residential tenancies are not served by the
+built-in provider at all. And the `http` provider is deliberately unimplemented
+rather than half-implemented: every vendor's API differs enough that a generic
+client would be wrong for all of them, and a stub that silently succeeds is
+worse than one that refuses.
+
+**Revisit when** a deployment needs advanced or qualified signatures, or when
+identity disputes appear in practice rather than in theory. The answer then is a
+provider implementation behind the existing adapter — the lifecycle, the consent
+record, and the artifact check do not change.

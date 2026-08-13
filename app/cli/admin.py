@@ -96,6 +96,65 @@ def check_schema() -> None:
     click.echo("Schema invariants OK: tenant coverage, audit columns, indexed foreign keys.")
 
 
+@admin_cli.command("verify-scanner")
+def verify_scanner() -> None:
+    """Prove the configured malware scanner actually works.
+
+    Runs the EICAR test string - the harmless file every scanner is required to
+    detect - through whatever scanner is configured, and fails loudly if it
+    comes back clean. "A ClamAV adapter is included" and "this deployment scans
+    uploads" are different claims, and only one of them is worth anything.
+    """
+    import io
+
+    from app.services.documents.scanner import get_scanner
+
+    scanner = get_scanner()
+    #: The standard harmless test file every scanner is required to detect.
+    eicar = rb"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+
+    infected = scanner.scan(io.BytesIO(eicar))
+    benign = scanner.scan(io.BytesIO(b"An ordinary lease, in plain text.\n"))
+
+    click.echo(f"Scanner: {scanner.name}")
+
+    # Both results failing the same way means the daemon never answered, which
+    # is a different problem from a scanner that answered wrongly - and says so,
+    # because "unreachable" and "false positive" have different fixes.
+    if not infected.clean and not benign.clean and infected.detail == benign.detail:
+        raise click.ClickException(
+            f"{scanner.name} did not answer ({infected.detail}). Uploads are "
+            "quarantined and stay there, which is the safe failure but not a "
+            "working one. Check the daemon is running and reachable at "
+            "the configured host and port."
+        )
+
+    if infected.clean:
+        raise click.ClickException(
+            f"{scanner.name} reported the EICAR test file as clean. Uploads are "
+            "not being scanned. Check that the daemon is reachable and its "
+            "signature database has finished loading."
+        )
+    click.echo(f"  EICAR   : detected ({infected.detail or 'flagged'})")
+
+    if not benign.clean:
+        raise click.ClickException(
+            f"{scanner.name} reported an ordinary text file as infected "
+            f"({benign.detail}). Every upload will be quarantined."
+        )
+    click.echo("  Benign  : passed")
+
+    if scanner.name == "structural":
+        click.secho(
+            "  This is the structural scanner. It detects EICAR and active "
+            "content, and it is NOT a virus scanner. Set MALWARE_SCANNER=clamav "
+            "for a deployment that accepts resident uploads.",
+            fg="yellow",
+        )
+    else:
+        click.echo("  Uploads on this deployment are scanned.")
+
+
 @admin_cli.command("purge-expired")
 def purge_expired() -> None:
     """Remove expired sessions and idempotency records."""

@@ -12,6 +12,34 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **The last five capability gaps are closed.** `docs/FEATURES.md` now has no
+  `Partial`, `Seam`, or `Modelled` rows.
+- **Ownership transfer.** Stakes were time-bounded and statements already
+  weighted each day separately, but nothing could move a stake, so a property
+  changing hands had to be edited by hand — destroying the history the temporal
+  model exists to keep. A transfer closes the outgoing stake the day *before*
+  and opens the incoming one on the day of, so the two never both cover the
+  transfer date and a March statement still resolves March's owners. The
+  invariant enforced is on the total: a transfer moving 96% where 100% was held
+  does not fail, it silently under-distributes for ever.
+- **Message threads.** Anchored to a lease, work order, or application, and
+  surfaced in all three portals plus the console. Visibility is a property of
+  the thread rather than of the reader: internal threads are excluded by the
+  query portals must use, not by a template filter one refactor from being
+  dropped. Participation is derived from the account, never from the request,
+  and a thread outside that set is 404 rather than 403.
+- **Turn management.** A turn spans vacated to rent-ready and opens
+  automatically when a move-out is recorded, so days-vacant is measured from
+  the keys coming back rather than from somebody remembering. A turn cannot be
+  marked ready while a required step is outstanding; a step may be skipped, but
+  never silently — the reason is mandatory and lands in the audit payload.
+- **Electronic signature.** The envelope lifecycle behind a provider adapter,
+  with a working built-in provider capturing a typed-name signature and its
+  consent record. The document's SHA-256 is pinned at send and re-checked
+  before completion, so a file swapped underneath an open envelope voids it
+  rather than inheriting somebody's consent. See ADR-0008 for what a
+  typed-name signature is and is not.
+
 - **Deposits can be taken and released.** The subledger that backs the trust
   reconciliation now has a surface: `POST /api/v1/deposits/collect` and
   `/release`, a per-lease balance at `GET /api/v1/leases/{id}/deposit` that
@@ -74,6 +102,23 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Fixed
 
+- **The configured malware scanner was unreachable.** `get_scanner` read
+  `malware_scanner` through a `getattr` default, and the setting did not exist
+  — so the fallback fired every time and selecting ClamAV was impossible. The
+  setting now exists along with host, port, and timeout; the reference
+  deployment runs ClamAV and waits on its health check; and
+  `flask atlas verify-scanner` proves the pipeline end to end with EICAR,
+  distinguishing a scanner that answered wrongly from one that did not answer.
+- **The default rate limit applied to nothing.** It was set by assigning
+  `limiter.default_limits` after `init_app`, which Flask-Limiter never reads,
+  so the limit existed in the settings and applied to no request. Now set
+  through `RATELIMIT_DEFAULT` before `init_app`.
+- **The reconciliation cleared balance was never stored.** It was assigned as a
+  plain instance attribute, so the difference computed correctly and the figure
+  it was derived from was discarded. Now a column.
+- **A seeded scheduled report went out with no recipient.** The controller was
+  looked up by email against a dict keyed by role code, and `.get` returned
+  `None` silently.
 - **Open redirect on the login page.** `_safe_next` refused `//evil.test` and
   anything with a scheme, but accepted `/\evil.test` — and browsers normalise
   the backslash, making it protocol-relative and therefore offsite. Found by

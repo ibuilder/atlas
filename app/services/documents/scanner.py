@@ -48,6 +48,10 @@ class ScanResult:
 
 
 class Scanner(Protocol):
+    #: Which scanner this is, so a result can say what produced it and an
+    #: operator can tell "structural checks passed" from "ClamAV passed it".
+    name: str
+
     def scan(self, stream: BinaryIO) -> ScanResult: ...
 
 
@@ -123,7 +127,14 @@ def get_scanner() -> Scanner:
         return scanner
 
     settings = current_app.config["SETTINGS"]
-    backend = getattr(settings, "malware_scanner", "structural")
-    scanner = ClamAVScanner() if backend == "clamav" else StructuralScanner()
+    scanner = (
+        ClamAVScanner(
+            host=settings.clamav_host,
+            port=settings.clamav_port,
+            timeout=settings.clamav_timeout_seconds,
+        )
+        if settings.malware_scanner == "clamav"
+        else StructuralScanner()
+    )
     current_app.extensions["atlas_scanner"] = scanner
     return scanner

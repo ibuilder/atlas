@@ -429,3 +429,68 @@ def test_api_download_requires_a_valid_token(client, org, make_user, sign_in):
     make_user("org_admin", email="tokenless@test.local")
     sign_in("tokenless@test.local")
     assert client.get("/api/v1/documents/download/not-a-real-token").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Scanner selection
+#
+# The adapter existing and the deployment using it are different claims. These
+# assert the second, which is the one that was not true.
+# ---------------------------------------------------------------------------
+
+
+def test_the_configured_scanner_is_the_one_that_runs(app):
+    """`malware_scanner` was read with a getattr default that always won.
+
+    The setting did not exist, so the fallback fired every time and selecting
+    ClamAV was impossible - the adapter was unreachable by configuration.
+    """
+    from app.services.documents.scanner import ClamAVScanner, StructuralScanner, get_scanner
+
+    with app.app_context():
+        app.extensions.pop("atlas_scanner", None)
+        app.config["SETTINGS"].malware_scanner = "clamav"
+        app.config["SETTINGS"].clamav_host = "scanner.internal"
+        app.config["SETTINGS"].clamav_port = 3311
+        try:
+            scanner = get_scanner()
+            assert isinstance(scanner, ClamAVScanner)
+            assert scanner.host == "scanner.internal"
+            assert scanner.port == 3311
+        finally:
+            app.extensions.pop("atlas_scanner", None)
+            app.config["SETTINGS"].malware_scanner = "structural"
+            app.config["SETTINGS"].clamav_host = "127.0.0.1"
+            app.config["SETTINGS"].clamav_port = 3310
+
+        assert isinstance(get_scanner(), StructuralScanner)
+        app.extensions.pop("atlas_scanner", None)
+
+
+def test_an_unreachable_scanner_fails_closed(app):
+    """Failing open would release unscanned files every time clamd restarts."""
+    import io
+
+    from app.services.documents.scanner import ClamAVScanner
+
+    # Port 1 is reserved and nothing listens on it.
+    result = ClamAVScanner(host="127.0.0.1", port=1, timeout=1).scan(io.BytesIO(b"anything"))
+    assert not result.clean
+    assert "unavailable" in (result.detail or "")
+
+
+def test_the_reference_deployment_scans_uploads():
+    """A compose file that ships without a scanner is one nobody adds later."""
+    from pathlib import Path
+
+    import yaml
+
+    compose = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / "docker-compose.yml").read_text(encoding="utf-8")
+    )
+
+    assert "clamav" in compose["services"], "the reference deployment has no scanner"
+    assert "clamav" in compose["services"]["web"]["depends_on"]
+    env = compose["services"]["web"]["environment"]
+    assert env["CLAMAV_HOST"] == "clamav"
+    assert "clamav" in env["MALWARE_SCANNER"]

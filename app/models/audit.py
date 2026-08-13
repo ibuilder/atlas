@@ -173,6 +173,16 @@ class AuditAction:
     DOCUMENT_SHARED = "document.shared"
     DOCUMENT_QUARANTINED = "document.quarantined"
 
+    # Electronic signature. Its own actions rather than borrowed document ones:
+    # "who signed what, and when" is the question asked of these records, and
+    # answering it should not mean filtering document events by payload shape.
+    ENVELOPE_CREATED = "esign.envelope_created"
+    ENVELOPE_SENT = "esign.envelope_sent"
+    ENVELOPE_SIGNED = "esign.signed"
+    ENVELOPE_COMPLETED = "esign.envelope_completed"
+    ENVELOPE_DECLINED = "esign.envelope_declined"
+    ENVELOPE_VOIDED = "esign.envelope_voided"
+
     # Automation and integration
     AUTOMATION_TRIGGERED = "automation.triggered"
     AUTOMATION_ACTION_EXECUTED = "automation.action_executed"

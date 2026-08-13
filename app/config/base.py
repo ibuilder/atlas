@@ -205,6 +205,16 @@ class Settings(BaseSettings):
     screening_backend: Literal["mock", "http"] = "mock"
     esign_backend: Literal["mock", "http"] = "mock"
 
+    # Uploads are quarantined until scanned either way; this decides what does
+    # the scanning. ``structural`` performs checks it can do correctly - EICAR,
+    # active content - and is explicit that it is not a virus scanner, so a
+    # green result from it is never mistaken for one. A deployment handling
+    # resident uploads should run ``clamav``.
+    malware_scanner: Literal["structural", "clamav"] = "structural"
+    clamav_host: str = "127.0.0.1"
+    clamav_port: int = 3310
+    clamav_timeout_seconds: int = 30
+
     # ------------------------------------------------------------ validators
     @field_validator("database_url")
     @classmethod

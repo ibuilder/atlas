@@ -23,12 +23,19 @@ x-app: &app
     SESSION_COOKIE_SECURE: "false"
     LOG_FORMAT: ${LOG_FORMAT:-console}
     STORAGE_LOCAL_PATH: /app/instance/storage
+    # The reference deployment scans uploads properly rather than structurally.
+    # `flask documents verify-scanner` proves it end to end with EICAR.
+    MALWARE_SCANNER: ${MALWARE_SCANNER:-clamav}
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: "3310"
   volumes:
     - atlas-instance:/app/instance
   depends_on:
     db:
       condition: service_healthy
     redis:
+      condition: service_healthy
+    clamav:
       condition: service_healthy
 
 services:
@@ -47,6 +54,23 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  clamav:
+    # Uploads are quarantined until scanned either way; this is what does the
+    # scanning. The first start downloads signatures and takes a few minutes,
+    # which is why the healthcheck has a long start period - the application
+    # waits for it rather than releasing unscanned files in the meantime.
+    image: clamav/clamav:1.4
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+    volumes:
+      - atlas-clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping 1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
 
   redis:
     image: redis:7-alpine
@@ -101,5 +125,6 @@ services:
 
 volumes:
   atlas-db:
+  atlas-clamav:
   atlas-redis:
   atlas-instance:
