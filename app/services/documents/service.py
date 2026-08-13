@@ -13,7 +13,7 @@ SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 import datetime as dt
-from typing import BinaryIO
+from typing import IO, BinaryIO
 
 from flask import current_app
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -91,7 +91,7 @@ def upload_document(
     session: Session,
     *,
     org_id: str,
-    stream: BinaryIO,
+    stream: IO[bytes],
     filename: str,
     declared_content_type: str | None = None,
     name: str | None = None,

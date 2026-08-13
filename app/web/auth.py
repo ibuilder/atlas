@@ -8,11 +8,12 @@ from __future__ import annotations
 from urllib.parse import urlparse
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask.typing import ResponseReturnValue
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.wrappers import Response
 
 from app.errors import AccountLocked, AuthenticationRequired, MFAInvalid
-from app.extensions import db, limiter
+from app.extensions import current_session, db, limiter
 from app.models.audit import AuditAction
 from app.models.base import unscoped
 from app.models.iam import User
@@ -66,7 +67,7 @@ def _echoable_next(target: str | None) -> str:
 
 
 @auth_bp.get("/login")
-def login_form() -> Response | str:
+def login_form() -> ResponseReturnValue:
     if getattr(current_user, "is_authenticated", False):
         return redirect(url_for("public.index"))
     # Sanitised on the way *in* as well as on the way out. The template escapes
@@ -78,10 +79,10 @@ def login_form() -> Response | str:
 
 @auth_bp.post("/login")
 @limiter.limit(_rate_limit)
-def login() -> Response | str:
+def login() -> ResponseReturnValue:
     email = (request.form.get("email") or "").strip()
     password = request.form.get("password") or ""
-    next_target = request.form.get("next") or ""
+    next_target = _echoable_next(request.form.get("next"))
 
     try:
         result = auth_service.authenticate(email, password)
@@ -107,7 +108,7 @@ def login() -> Response | str:
 
 
 @auth_bp.get("/mfa")
-def mfa_form() -> Response | str:
+def mfa_form() -> ResponseReturnValue:
     if not session_helpers.get_mfa_pending():
         return redirect(url_for("auth.login_form"))
     return render_template("auth/mfa.html", next=request.args.get("next", ""))
@@ -115,18 +116,18 @@ def mfa_form() -> Response | str:
 
 @auth_bp.post("/mfa")
 @limiter.limit(_rate_limit)
-def mfa() -> Response | str:
+def mfa() -> ResponseReturnValue:
     pending_id = session_helpers.get_mfa_pending()
     if not pending_id:
         return redirect(url_for("auth.login_form"))
 
-    with unscoped(db.session):
+    with unscoped(current_session()):
         user = db.session.get(User, pending_id)
     if user is None or not user.is_active:
         session_helpers.clear_mfa_pending()
         return redirect(url_for("auth.login_form"))
 
-    next_target = request.form.get("next") or ""
+    next_target = _echoable_next(request.form.get("next"))
     try:
         result = auth_service.complete_mfa_challenge(user, request.form.get("code") or "")
     except (MFAInvalid, AccountLocked):

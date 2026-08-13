@@ -23,6 +23,7 @@ CONSOLE_PAGES = (
     "/admin/properties",
     "/admin/work-orders",
     "/admin/ledger",
+    "/admin/deposits",
     "/admin/audit",
     "/admin/roles",
     "/admin/users",

@@ -96,9 +96,9 @@ def build_authorization_context(
 ) -> AuthorizationContext:
     """Resolve every grant and ownership set for ``user`` within ``org_id``."""
     if session is None:
-        from app.extensions import db
+        from app.extensions import current_session
 
-        session = db.session
+        session = current_session()
 
     org_id = org_id or user.org_id
     now = utcnow()

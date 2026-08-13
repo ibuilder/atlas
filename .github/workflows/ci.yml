@@ -48,9 +48,11 @@ jobs:
       - name: Lint
         run: ruff check app tests migrations --output-format github
 
+      # Blocking as of the clean-up that took this to zero. It earns the right
+      # to fail a build: the errors it was quietly reporting included a column
+      # that was never persisted and a rate limit that was never applied.
       - name: Type check
         run: mypy app
-        continue-on-error: true
 
       - name: Static security analysis
         run: bandit -r app -q -c pyproject.toml

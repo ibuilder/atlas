@@ -152,9 +152,10 @@ def forecast_asset(
     else:
         if not asset.installed_on or not asset.expected_life_years:
             return None
-        target = asset.compute_replacement_date()
-        if target is None:  # pragma: no cover - defensive
+        computed = asset.compute_replacement_date()
+        if computed is None:  # pragma: no cover - defensive
             return None
+        target = computed
         confidence = "estimated"
         drivers.append(
             f"Installed {asset.installed_on.isoformat()}, "

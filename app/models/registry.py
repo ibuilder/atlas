@@ -71,7 +71,7 @@ def tenant_tables() -> list[Table]:
         (
             mapper.local_table
             for mapper in Base.registry.mappers
-            if issubclass(mapper.class_, TenantModel) and mapper.local_table is not None
+            if issubclass(mapper.class_, TenantModel) and isinstance(mapper.local_table, Table)
         ),
         key=lambda table: table.name,
     )
@@ -88,7 +88,7 @@ def assert_tenant_coverage() -> None:
     offenders: list[str] = []
     for mapper in Base.registry.mappers:
         table = mapper.local_table
-        if table is None or "org_id" not in table.columns:
+        if not isinstance(table, Table) or "org_id" not in table.columns:
             continue
         if issubclass(mapper.class_, TenantModel):
             continue
@@ -109,7 +109,7 @@ def assert_timestamp_coverage() -> None:
     offenders: list[str] = []
     for mapper in Base.registry.mappers:
         table = mapper.local_table
-        if table is None:
+        if not isinstance(table, Table):
             continue
         missing = required - set(table.columns.keys())
         if missing:

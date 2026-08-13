@@ -17,7 +17,7 @@ from pydantic import Field
 from app.api.helpers import parse_body, respond
 from app.api.v1 import api_v1_bp
 from app.errors import AuthenticationRequired, ValidationFailed
-from app.extensions import db, limiter
+from app.extensions import current_session, db, limiter
 from app.models.audit import AuditAction
 from app.models.base import unscoped
 from app.models.iam import User
@@ -92,7 +92,7 @@ def verify_mfa() -> Response:
     if not pending_user_id:
         raise AuthenticationRequired("No multi-factor challenge is in progress.")
 
-    with unscoped(db.session):
+    with unscoped(current_session()):
         user = db.session.get(User, pending_user_id)
     if user is None or not user.is_active:
         session_helpers.clear_mfa_pending()

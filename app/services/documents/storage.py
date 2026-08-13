@@ -25,7 +25,7 @@ import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, Protocol
+from typing import IO, BinaryIO, Protocol
 
 from app.errors import ValidationFailed
 from app.logging import get_logger
@@ -121,7 +121,7 @@ class StoredObject:
 class StorageAdapter(Protocol):
     """The contract every backend implements."""
 
-    def put(self, key: str, stream: BinaryIO) -> int: ...
+    def put(self, key: str, stream: IO[bytes]) -> int: ...
     def get(self, key: str) -> BinaryIO: ...
     def delete(self, key: str) -> None: ...
     def exists(self, key: str) -> bool: ...
@@ -303,7 +303,7 @@ def build_storage_key(*, tenant_prefix: str, extension: str, at: dt.date | None 
     return f"{prefix}/{when:%Y/%m}/{uuid7_str()}{extension}"
 
 
-def digest_and_size(stream: BinaryIO, *, max_bytes: int) -> tuple[str, int, bytes]:
+def digest_and_size(stream: IO[bytes], *, max_bytes: int) -> tuple[str, int, bytes]:
     """Stream the payload once, returning its digest, size, and leading bytes.
 
     Streamed rather than read whole: a 50MB upload held entirely in memory per
@@ -359,7 +359,7 @@ class LocalStorage:
             raise ValidationFailed("Invalid storage key.")
         return candidate
 
-    def put(self, key: str, stream: BinaryIO) -> int:
+    def put(self, key: str, stream: IO[bytes]) -> int:
         path = self._path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as handle:
@@ -410,7 +410,7 @@ class S3Storage:
             )
         return self._client
 
-    def put(self, key: str, stream: BinaryIO) -> int:
+    def put(self, key: str, stream: IO[bytes]) -> int:
         self.client.upload_fileobj(stream, self.bucket, key)
         return self.client.head_object(Bucket=self.bucket, Key=key)["ContentLength"]
 

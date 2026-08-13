@@ -28,7 +28,7 @@ from decimal import Decimal
 
 import click
 
-from app.extensions import db
+from app.extensions import current_session, db
 from app.models.types import utcnow
 
 __all__ = ["seed_operations"]
@@ -53,7 +53,7 @@ def seed_operations(
     summary["pm_schedules"] = _seed_preventive(organization, properties, assets)
     summary["inspections"] = _seed_inspection(organization, properties[0], units, leases)
     summary["automation_rules"] = _seed_automation(organization, properties[0])
-    summary["reconciliations"] = _seed_reconciliation(organization, accounts)
+    summary["reconciliations"] = _seed_reconciliation(organization, accounts, users)
     summary["owner_statements"] = _seed_ownership(organization, properties[0], accounts)
     summary["scheduled_reports"] = _seed_reports(organization, users)
     summary["identity_providers"] = _seed_sso(organization)
@@ -74,7 +74,7 @@ def _seed_spaces(organization, prop, units):  # noqa: ANN001, ANN202
     from app.services.assets.spaces import create_space
 
     site = create_space(
-        db.session,
+        current_session(),
         org_id=organization.id,
         property_id=prop.id,
         code="HAR-SITE",
@@ -82,7 +82,7 @@ def _seed_spaces(organization, prop, units):  # noqa: ANN001, ANN202
         kind=SpaceKind.COMMON_AREA,
     )
     riser = create_space(
-        db.session,
+        current_session(),
         org_id=organization.id,
         property_id=prop.id,
         code="HAR-RISER-A",
@@ -91,7 +91,7 @@ def _seed_spaces(organization, prop, units):  # noqa: ANN001, ANN202
         parent=site,
     )
     plant = create_space(
-        db.session,
+        current_session(),
         org_id=organization.id,
         property_id=prop.id,
         code="HAR-PLANT",
@@ -104,7 +104,7 @@ def _seed_spaces(organization, prop, units):  # noqa: ANN001, ANN202
     created = [site, riser, plant]
     for level_number in (1, 2):
         level = create_space(
-            db.session,
+            current_session(),
             org_id=organization.id,
             property_id=prop.id,
             code=f"HAR-L{level_number}",
@@ -117,7 +117,7 @@ def _seed_spaces(organization, prop, units):  # noqa: ANN001, ANN202
 
         for unit in [u for u in units if u.property_id == prop.id and u.floor == level_number]:
             flat = create_space(
-                db.session,
+                current_session(),
                 org_id=organization.id,
                 property_id=prop.id,
                 code=f"HAR-{unit.unit_number}",
@@ -128,7 +128,7 @@ def _seed_spaces(organization, prop, units):  # noqa: ANN001, ANN202
                 area_sqft=Decimal(str(unit.square_feet or 700)),
             )
             kitchen = create_space(
-                db.session,
+                current_session(),
                 org_id=organization.id,
                 property_id=prop.id,
                 code=f"HAR-{unit.unit_number}-K",
@@ -231,7 +231,7 @@ def _seed_assets(organization, prop, spaces):  # noqa: ANN001, ANN202
     # replacement: the repair-or-replace advice has something real to say.
     for months_ago, cost in ((11, "1450.00"), (7, "980.00"), (4, "1620.00"), (1, "2100.00")):
         record_service(
-            db.session,
+            current_session(),
             asset=boiler,
             event_type=ServiceEventType.REPAIR,
             performed_on=TODAY - dt.timedelta(days=30 * months_ago),
@@ -240,7 +240,7 @@ def _seed_assets(organization, prop, spaces):  # noqa: ANN001, ANN202
             condition_after=2,
         )
     record_service(
-        db.session,
+        current_session(),
         asset=lift,
         event_type=ServiceEventType.PREVENTIVE,
         performed_on=TODAY - dt.timedelta(days=45),
@@ -334,7 +334,7 @@ def _seed_inspection(organization, prop, units, leases) -> int:  # noqa: ANN001
 
     lease = next((lease for lease in leases if lease.property_id == prop.id), None)
     inspection = schedule_inspection(
-        db.session,
+        current_session(),
         org_id=organization.id,
         kind=InspectionKind.MOVE_OUT,
         property_id=prop.id,
@@ -343,7 +343,7 @@ def _seed_inspection(organization, prop, units, leases) -> int:  # noqa: ANN001
         template=template,
         scheduled_for=None,
     )
-    start_inspection(db.session, inspection=inspection)
+    start_inspection(current_session(), inspection=inspection)
 
     # One failure with a cost, so the deposit deduction has evidence behind it.
     findings = {
@@ -356,7 +356,7 @@ def _seed_inspection(organization, prop, units, leases) -> int:  # noqa: ANN001
     for item in inspection.items:
         result, severity, cost = findings[item.name]
         record_finding(
-            db.session,
+            current_session(),
             inspection=inspection,
             finding=ItemFinding(
                 item_id=item.id,
@@ -368,8 +368,8 @@ def _seed_inspection(organization, prop, units, leases) -> int:  # noqa: ANN001
             ),
         )
 
-    raise_work_orders_from_findings(db.session, inspection=inspection)
-    complete_inspection(db.session, inspection=inspection, inspector_signed=True)
+    raise_work_orders_from_findings(current_session(), inspection=inspection)
+    complete_inspection(current_session(), inspection=inspection, inspector_signed=True)
     db.session.flush()
     return 1
 
@@ -390,7 +390,7 @@ def _seed_automation(organization, prop) -> int:  # noqa: ANN001
     )
 
     escalation = create_rule(
-        db.session,
+        current_session(),
         org_id=organization.id,
         code="escalate-emergencies",
         name="Escalate emergency work orders",
@@ -411,7 +411,7 @@ def _seed_automation(organization, prop) -> int:  # noqa: ANN001
         ],
         max_runs_per_hour=200,
     )
-    activate_rule(db.session, rule=escalation)
+    activate_rule(current_session(), rule=escalation)
 
     # A dry run against a real work order, which is what promotion requires.
     from app.models.maintenance import WorkOrder
@@ -423,7 +423,7 @@ def _seed_automation(organization, prop) -> int:  # noqa: ANN001
     )
     if sample is not None:
         run_rule(
-            db.session,
+            current_session(),
             rule=escalation,
             event_type="work_order.created",
             payload={"priority": "emergency"},
@@ -431,11 +431,11 @@ def _seed_automation(organization, prop) -> int:  # noqa: ANN001
             subject_id=sample.id,
             force_dry_run=True,
         )
-        promote_rule_to_live(db.session, rule=escalation)
+        promote_rule_to_live(current_session(), rule=escalation)
 
         # And one live run, so the console shows a real execution with steps.
         dispatch_event(
-            db.session,
+            current_session(),
             org_id=organization.id,
             event_type="work_order.created",
             payload={"priority": "emergency"},
@@ -446,7 +446,7 @@ def _seed_automation(organization, prop) -> int:  # noqa: ANN001
     # A second rule left deliberately in dry run, because that is the state a
     # new rule should be found in.
     create_rule(
-        db.session,
+        current_session(),
         org_id=organization.id,
         code="notify-on-completion",
         name="Announce completed work",
@@ -465,7 +465,7 @@ def _seed_automation(organization, prop) -> int:  # noqa: ANN001
 # ---------------------------------------------------------------------------
 
 
-def _seed_reconciliation(organization, accounts) -> int:  # noqa: ANN001
+def _seed_reconciliation(organization, accounts, users) -> int:  # noqa: ANN001
     """A completed reconciliation, matched through the real matcher."""
     from sqlalchemy import select
 
@@ -523,7 +523,7 @@ def _seed_reconciliation(organization, accounts) -> int:  # noqa: ANN001
     )
     for lease in active_leases:
         collect_deposit(
-            db.session,
+            current_session(),
             org_id=organization.id,
             lease_id=lease.id,
             bank_account_id=trust.id,
@@ -562,16 +562,16 @@ def _seed_reconciliation(organization, accounts) -> int:  # noqa: ANN001
         return 0
 
     import_statement(
-        db.session,
+        current_session(),
         org_id=organization.id,
         bank_account_id=operating.id,
         lines=lines,
     )
-    auto_match(db.session, org_id=organization.id, bank_account_id=operating.id)
+    auto_match(current_session(), org_id=organization.id, bank_account_id=operating.id)
 
     closing = sum((line.amount for line in lines), Decimal("0"))
     reconciliation = open_reconciliation(
-        db.session,
+        current_session(),
         org_id=organization.id,
         bank_account_id=operating.id,
         statement_start=period_start,
@@ -579,11 +579,15 @@ def _seed_reconciliation(organization, accounts) -> int:  # noqa: ANN001
         opening_balance=Decimal("0.00"),
         closing_balance=closing,
     )
+    # A sign-off is attributed to a person. The controller is the role that
+    # holds it in the seeded organization, and in a real one.
+    controller = users["controller"]
+
     try:
         complete_reconciliation(
-            db.session,
+            current_session(),
             reconciliation=reconciliation,
-            completed_by_id=None,
+            completed_by_id=controller.id,
             notes="Seeded demo reconciliation.",
         )
     except Exception:  # noqa: BLE001
@@ -651,7 +655,7 @@ def _seed_ownership(organization, prop, accounts) -> int:  # noqa: ANN001
     for owner in (outgoing, incoming):
         try:
             generate_statement(
-                db.session,
+                current_session(),
                 org_id=organization.id,
                 owner_entity_id=owner.id,
                 property_id=prop.id,
@@ -676,7 +680,7 @@ def _seed_reports(organization, users) -> int:  # noqa: ANN001
     from app.models.reporting import ReportFormat, ScheduledReport
     from app.models.types import utcnow
 
-    controller = users.get("controller@atlas.demo")
+    controller = users["controller"]
     schedules = [
         ScheduledReport(
             org_id=organization.id,
@@ -685,7 +689,7 @@ def _seed_reports(organization, users) -> int:  # noqa: ANN001
             description="Every occupied unit with its lease terms.",
             schedule="0 7 * * 1",
             format=ReportFormat.CSV,
-            recipients=([{"type": "user", "id": controller.id}] if controller is not None else []),
+            recipients=[{"type": "user", "id": controller.id}],
             is_active=True,
             next_run_at=utcnow() + dt.timedelta(days=1),
         ),
@@ -759,7 +763,7 @@ def _seed_projections(organization) -> int:  # noqa: ANN001
     for days_ago in range(14, -1, -1):
         points += len(
             snapshot_metrics(
-                db.session, org_id=organization.id, as_of=TODAY - dt.timedelta(days=days_ago)
+                current_session(), org_id=organization.id, as_of=TODAY - dt.timedelta(days=days_ago)
             )
         )
     db.session.flush()

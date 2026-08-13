@@ -79,9 +79,9 @@ def record_audit_event(
     validate_action(action)
 
     if session is None:
-        from app.extensions import db
+        from app.extensions import current_session
 
-        session = db.session
+        session = current_session()
 
     ctx = current_context()
     org_id = org_id or (ctx.org_id if ctx else None)
@@ -226,9 +226,9 @@ def verify_chain(session: Session | None = None, *, org_id: str) -> dict[str, An
     precisely the event the chain exists to make undeniable.
     """
     if session is None:
-        from app.extensions import db
+        from app.extensions import current_session
 
-        session = db.session
+        session = current_session()
 
     stmt = (
         select(AuditEvent)

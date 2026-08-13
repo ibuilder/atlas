@@ -21,7 +21,7 @@ from app.api.helpers import (
 )
 from app.api.v1 import api_v1_bp
 from app.errors import NotFound
-from app.extensions import db
+from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.maintenance import (
     WORK_ORDER_TERMINAL,
@@ -78,7 +78,9 @@ def list_requests() -> Response:
     if query.unit_id:
         stmt = stmt.where(MaintenanceRequest.unit_id == query.unit_id)
 
-    page = paginate(db.session, stmt, MaintenanceRequest, limit=query.limit, cursor=query.cursor)
+    page = paginate(
+        current_session(), stmt, MaintenanceRequest, limit=query.limit, cursor=query.cursor
+    )
     # Portal users see only their own; the policy engine is the authority, and
     # filtering here keeps a resident's list from leaking neighbours' reports.
     from app.security.policies import filter_permitted
@@ -153,7 +155,7 @@ def list_work_orders() -> Response:
             WorkOrder.status.notin_(list(WORK_ORDER_TERMINAL)),
         )
 
-    page = paginate(db.session, stmt, WorkOrder, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, WorkOrder, limit=query.limit, cursor=query.cursor)
     from app.security.policies import filter_permitted
 
     page.items = filter_permitted(Perm.WORK_ORDER_READ, page.items)

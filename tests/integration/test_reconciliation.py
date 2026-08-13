@@ -360,6 +360,33 @@ def test_it_completes_once_everything_agrees(db, org, scope, accounts, bank):
     assert reconciliation.completed_by_id == OPERATOR
 
 
+def test_the_cleared_balance_survives_a_reload(db, org, scope, accounts, bank):
+    """It has to be a column, not an attribute set on the way past.
+
+    Asserting on the object the service just returned passes either way. The
+    figure the difference was derived from is only actually retained if it
+    comes back from the database.
+    """
+    from app.models.accounting import Reconciliation
+
+    _ledger_receipt(db, org, accounts)
+    import_statement(db.session, org_id=org.id, bank_account_id=bank.id, lines=[_line()])
+    db.session.commit()
+    auto_match(db.session, org_id=org.id, bank_account_id=bank.id)
+    db.session.commit()
+
+    reconciliation = _reconciliation(db, org, bank, closing="1200.00")
+    complete_reconciliation(db.session, reconciliation=reconciliation, completed_by_id=OPERATOR)
+    db.session.commit()
+
+    reconciliation_id = reconciliation.id
+    db.session.expunge_all()
+
+    reloaded = db.session.get(Reconciliation, reconciliation_id)
+    assert reloaded is not None
+    assert reloaded.cleared_balance == Decimal("1200.0000")
+
+
 def test_it_cannot_complete_with_an_unresolved_exception(db, org, scope, accounts, bank):
     _ledger_receipt(db, org, accounts)
     import_statement(db.session, org_id=org.id, bank_account_id=bank.id, lines=[_line()])

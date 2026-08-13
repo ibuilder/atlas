@@ -241,7 +241,10 @@ _RESERVED_RECORD_KEYS: frozenset[str] = frozenset(
 class JsonFormatter(logging.Formatter):
     """One JSON object per line, with a stable base schema."""
 
-    converter = time.gmtime
+    @staticmethod
+    def converter(timestamp: float | None = None) -> time.struct_time:  # type: ignore[override]
+        """UTC, always. A log line whose timezone depends on the host is not evidence."""
+        return time.gmtime(timestamp)
 
     def __init__(self, service: str = "atlas-pmos", environment: str = "development") -> None:
         super().__init__()

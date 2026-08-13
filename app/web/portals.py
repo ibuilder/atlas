@@ -26,7 +26,7 @@ from sqlalchemy import select
 from werkzeug.wrappers import Response
 
 from app.errors import AtlasError, PermissionDenied
-from app.extensions import db
+from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.accounting import Invoice, InvoiceStatus
 from app.models.iam import UserType
@@ -291,7 +291,7 @@ def resident_pay_invoice(invoice_id: str) -> Response:
 
     try:
         record_payment(
-            db.session,
+            current_session(),
             org_id=org_id,
             amount=amount,
             method=PaymentMethod.ACH,
@@ -347,7 +347,7 @@ def resident_raise_request() -> Response:
 
     try:
         created = create_request(
-            db.session,
+            current_session(),
             org_id=org_id,
             property_id=lease.property_id,
             title=title[:200],
@@ -531,7 +531,7 @@ def vendor_update_work_order(work_order_id: str) -> Response:
 
     try:
         transition_work_order(
-            db.session,
+            current_session(),
             work_order=work_order,
             target=target,
             actor_id=current_user.id,

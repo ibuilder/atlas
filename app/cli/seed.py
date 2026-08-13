@@ -27,7 +27,7 @@ import click
 from flask.cli import AppGroup
 
 from app.context import system_context, use_context
-from app.extensions import db
+from app.extensions import current_session, db
 
 seed_cli = AppGroup("seed", help="Seed data for demos and local development.")
 
@@ -129,7 +129,7 @@ def _create_org(slug: str):  # noqa: ANN202
 
     with use_context(system_context("seed")):
         organization = create_organization(
-            db.session,
+            current_session(),
             name="Northlight Property Group",
             slug=slug,
             legal_name="Northlight Property Group LLC",
@@ -146,7 +146,7 @@ def _create_org(slug: str):  # noqa: ANN202
 def _seed_accounts(organization):  # noqa: ANN001, ANN202
     from app.services.accounting.chart import seed_chart_of_accounts
 
-    accounts = seed_chart_of_accounts(db.session, organization.id)
+    accounts = seed_chart_of_accounts(current_session(), organization.id)
     db.session.flush()
     return accounts
 
@@ -159,7 +159,7 @@ def _seed_users(organization):  # noqa: ANN001, ANN202
         if db.session.query(_user_model()).filter_by(email=email).first():
             continue
         created[role] = create_user(
-            db.session,
+            current_session(),
             org_id=organization.id,
             email=email,
             full_name=name,
@@ -335,7 +335,7 @@ def _seed_leases(organization, units):  # noqa: ANN001, ANN202
         start = today.replace(day=1) - dt.timedelta(days=30 * (index % 10))
         lease = Lease(
             org_id=organization.id,
-            lease_number=next_number(db.session, SequenceKey.LEASE, org_id=organization.id),
+            lease_number=next_number(current_session(), SequenceKey.LEASE, org_id=organization.id),
             property_id=unit.property_id,
             unit_id=unit.id,
             status=LeaseStatus.ACTIVE,
@@ -378,7 +378,7 @@ def _seed_portal_users(organization, residents):  # noqa: ANN001
 
     if not db.session.query(User).filter_by(email="resident@atlas.demo").first() and residents:
         create_user(
-            db.session,
+            current_session(),
             org_id=organization.id,
             email="resident@atlas.demo",
             full_name=residents[0].full_name,
@@ -415,7 +415,7 @@ def _seed_portal_users(organization, residents):  # noqa: ANN001
 
     if not db.session.query(User).filter_by(email="owner@atlas.demo").first():
         create_user(
-            db.session,
+            current_session(),
             org_id=organization.id,
             email="owner@atlas.demo",
             full_name="Northlight Capital Partners",
@@ -427,7 +427,7 @@ def _seed_portal_users(organization, residents):  # noqa: ANN001
     vendor = db.session.query(Vendor).filter_by(org_id=organization.id).first()
     if vendor and not db.session.query(User).filter_by(email="vendor@atlas.demo").first():
         create_user(
-            db.session,
+            current_session(),
             org_id=organization.id,
             email="vendor@atlas.demo",
             full_name="Apex Mechanical Dispatch",
@@ -452,7 +452,7 @@ def _seed_financials(organization, leases, accounts):  # noqa: ANN001
         for month_offset in (2, 1, 0):
             issue_date = _month_start(today, -month_offset)
             invoice = issue_invoice(
-                db.session,
+                current_session(),
                 org_id=organization.id,
                 charges=[
                     ChargeInput(
@@ -477,7 +477,7 @@ def _seed_financials(organization, leases, accounts):  # noqa: ANN001
             is_delinquent = index % 5 == 0 and month_offset == 0
             if not is_delinquent:
                 record_payment(
-                    db.session,
+                    current_session(),
                     org_id=organization.id,
                     amount=invoice.total,
                     method=PaymentMethod.ACH,
@@ -530,7 +530,7 @@ def _seed_maintenance(organization, properties, units, leases, vendor, users):  
     for index, (title, description, trade, priority) in enumerate(scenarios):
         lease = leases[index % len(leases)] if leases else None
         request = create_request(
-            db.session,
+            current_session(),
             org_id=organization.id,
             property_id=lease.property_id if lease else properties[0].id,
             unit_id=lease.unit_id if lease else None,
@@ -544,7 +544,7 @@ def _seed_maintenance(organization, properties, units, leases, vendor, users):  
         )
 
         work_order = create_work_order(
-            db.session,
+            current_session(),
             org_id=organization.id,
             property_id=request.property_id,
             title=title,
@@ -558,7 +558,7 @@ def _seed_maintenance(organization, properties, units, leases, vendor, users):  
         # Walk each one a different distance down the lifecycle so the queue
         # shows a realistic spread rather than a wall of identical rows.
         transition_work_order(
-            db.session,
+            current_session(),
             work_order=work_order,
             target=WorkOrderStatus.ASSIGNED,
             vendor_id=vendor.id,
@@ -567,7 +567,7 @@ def _seed_maintenance(organization, properties, units, leases, vendor, users):  
         )
         if index % 3 != 2:
             transition_work_order(
-                db.session,
+                current_session(),
                 work_order=work_order,
                 target=WorkOrderStatus.IN_PROGRESS,
                 actor_label="Apex Mechanical",
@@ -575,7 +575,7 @@ def _seed_maintenance(organization, properties, units, leases, vendor, users):  
             )
         if index % 3 == 0:
             transition_work_order(
-                db.session,
+                current_session(),
                 work_order=work_order,
                 target=WorkOrderStatus.COMPLETED,
                 actor_label="Apex Mechanical",

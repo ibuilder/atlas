@@ -163,8 +163,11 @@ def _init_security(app: Flask, settings: Settings) -> None:
     cache.init_app(app)
 
     if settings.ratelimit_enabled:
+        # Through config, before init_app. Assigning ``limiter.default_limits``
+        # afterwards sets a plain attribute that Flask-Limiter never reads, so
+        # the configured default silently did not apply to anything.
+        app.config["RATELIMIT_DEFAULT"] = settings.ratelimit_default
         limiter.init_app(app)
-        limiter.default_limits = [settings.ratelimit_default]
 
     talisman.init_app(
         app,

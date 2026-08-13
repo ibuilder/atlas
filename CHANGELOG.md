@@ -12,6 +12,19 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Deposits can be taken and released.** The subledger that backs the trust
+  reconciliation now has a surface: `POST /api/v1/deposits/collect` and
+  `/release`, a per-lease balance at `GET /api/v1/leases/{id}/deposit` that
+  answers as at any date, and a **Deposits** page in the console showing each
+  trust account against its own beneficiaries. Collecting and releasing are
+  separate permissions - `deposit.collect` sits with the accountants,
+  `deposit.release` with the controllers - for the same reason entering a bill
+  is split from paying it: money leaving a trust account belongs to somebody
+  else. Residents get `deposit.read` and nothing more.
+- **`mypy app` is clean and now fails the build.** It was reporting 117 errors
+  behind `continue-on-error`, which is the same as not running it. Two were
+  real: see below.
+
 - **The three portals now write.** Residents pay an invoice and report a fault
   from the portal rather than only through the API; owners read the statements
   the system has been able to generate since 0.2; vendors accept, start, hold,
@@ -121,6 +134,22 @@ codes and the `/api/v1` namespace are already treated as stable.
   unspecified and substituted a full month's rent, so a lease written with a
   deposit-replacement rider in place of a deposit refunded a month's rent at
   move-out.
+- **The configured default rate limit applied to nothing.** The factory set
+  `limiter.default_limits` after `init_app` - a plain attribute Flask-Limiter
+  never reads - so `RATELIMIT_DEFAULT` was configured, visible in settings, and
+  entirely inert. Every unlimited endpoint was unlimited in production too. Now
+  set through `app.config` before `init_app`, where the limiter reads it.
+  Found by mypy.
+- **A reconciliation's cleared balance was never stored.** `refresh_totals`
+  assigned `cleared_balance` as an undeclared instance attribute, which
+  computed the difference correctly and then discarded the figure that
+  difference was derived from. It is now a column, so a completed
+  reconciliation can be re-examined rather than re-derived. The existing test
+  passed either way because it asserted on the object the service had just
+  returned; the new one reloads it. Found by mypy.
+- The seeded scheduled report looked up its recipient by email in a dictionary
+  keyed by role code. Because the lookup used `.get`, it silently returned
+  `None` and the schedule went out addressed to nobody.
 
 ## [0.5.0] - 2026-08-10
 

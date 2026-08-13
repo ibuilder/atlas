@@ -563,6 +563,12 @@ class Reconciliation(TenantModel):
     statement_opening_balance: Mapped[Decimal] = mapped_column(Money, nullable=False, default=ZERO)
     statement_closing_balance: Mapped[Decimal] = mapped_column(Money, nullable=False, default=ZERO)
 
+    #: Opening balance plus everything matched: the statement side of the
+    #: tie-out. Stored for the same reason as the ledger balance below - it was
+    #: previously assigned as a plain instance attribute, which computed the
+    #: difference correctly and then discarded the figure the difference was
+    #: derived from.
+    cleared_balance: Mapped[Decimal] = mapped_column(Money, nullable=False, default=ZERO)
     #: Ledger balance computed at completion, retained so a historical
     #: reconciliation can be re-examined without recomputing from a ledger that
     #: has moved on.

@@ -5,6 +5,8 @@ SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 pytestmark = pytest.mark.security
@@ -250,3 +252,42 @@ def test_openapi_document_is_valid_and_describes_the_routes(client):
     assert "/api/v1/properties" in document["paths"]
     assert "bearerAuth" in document["components"]["securitySchemes"]
     assert document["info"]["license"]["identifier"] == "MIT"
+
+
+def test_the_configured_default_rate_limit_reaches_the_limiter():
+    """Configuring a limit and applying one are not the same thing.
+
+    The default used to be set by assigning ``limiter.default_limits`` after
+    ``init_app`` - a plain attribute Flask-Limiter never reads - so the limit
+    existed in the settings, appeared in the factory, and applied to nothing.
+
+    Asserted in two halves, on a throwaway limiter rather than the application's
+    own: enabling rate limiting on a second app would attach default limits to
+    the shared singleton and rate-limit the rest of the suite.
+    """
+    from flask import Flask
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+
+    from app.config import load_settings
+
+    settings = load_settings("testing")
+
+    # 1. RATELIMIT_DEFAULT is the key Flask-Limiter actually honours.
+    probe_app = Flask(__name__)
+    probe_app.config["RATELIMIT_STORAGE_URI"] = "memory://"
+    probe_app.config["RATELIMIT_DEFAULT"] = settings.ratelimit_default
+    probe = Limiter(key_func=get_remote_address)
+    probe.init_app(probe_app)
+
+    with probe_app.app_context():
+        applied = [str(entry.limit) for entry in probe.limit_manager.default_limits]
+    assert applied, "RATELIMIT_DEFAULT is no longer the key the limiter reads"
+    assert settings.ratelimit_default.split()[0] == applied[0].split()[0]
+
+    # 2. The factory sets that key, rather than an attribute nothing reads.
+    source = (Path(__file__).resolve().parents[2] / "app" / "factory.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'app.config["RATELIMIT_DEFAULT"] = settings.ratelimit_default' in source
+    assert "limiter.default_limits =" not in source

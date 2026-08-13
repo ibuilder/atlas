@@ -37,9 +37,9 @@ def transaction(session: Session | None = None, *, commit: bool = True) -> Itera
     calls compose without each one committing partial work.
     """
     if session is None:
-        from app.extensions import db
+        from app.extensions import current_session
 
-        session = db.session
+        session = current_session()
 
     if not commit:
         yield session

@@ -10,15 +10,16 @@ SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from decimal import Decimal
 
 from flask import Blueprint, abort, render_template, request
 from flask_login import login_required
 from sqlalchemy import func, select
 
-from app.extensions import db
+from app.extensions import current_session, db
 from app.middleware import require_org_scope
-from app.models.accounting import Invoice, InvoiceStatus
+from app.models.accounting import BankAccount, Invoice, InvoiceStatus
 from app.models.audit import AuditEvent
 from app.models.iam import (
     Permission,
@@ -37,6 +38,27 @@ from app.security.policies import require
 admin_bp = Blueprint("admin", __name__)
 
 __all__ = ["admin_bp"]
+
+
+@dataclass(frozen=True)
+class _Holding:
+    """What one lease is owed out of one trust account."""
+
+    lease_id: str
+    lease: Lease | None
+    held: Decimal
+
+
+@dataclass(frozen=True)
+class _TrustAccountView:
+    """One trust account and every beneficiary of it."""
+
+    account: BankAccount
+    holdings: list[_Holding]
+
+    @property
+    def total(self) -> Decimal:
+        return sum((holding.held for holding in self.holdings), Decimal("0"))
 
 
 @admin_bp.get("/")
@@ -189,12 +211,83 @@ def ledger() -> str:
 
     from app.services.accounting.ledger import trial_balance
 
-    rows = trial_balance(db.session, org_id=org_id)
+    rows = trial_balance(current_session(), org_id=org_id)
     return render_template(
         "admin/ledger.html",
         rows=rows,
         total_debit=sum((row["debit"] for row in rows), Decimal("0")),
         total_credit=sum((row["credit"] for row in rows), Decimal("0")),
+    )
+
+
+@admin_bp.get("/deposits")
+@login_required
+def deposits() -> str:
+    """What is held in trust, and for whom.
+
+    Presented per trust account rather than as one list, because that is the
+    unit a reconciliation is performed against - and an operator with an account
+    per jurisdiction has to be able to see them apart.
+    """
+    require(Perm.DEPOSIT_READ)
+    org_id = require_org_scope()
+
+    from app.models.accounting import DepositMovement
+    from app.services.accounting.deposits import deposit_balances
+
+    as_of_raw = (request.args.get("as_of") or "").strip()
+    try:
+        as_of = dt.date.fromisoformat(as_of_raw) if as_of_raw else utcnow().date()
+    except ValueError:
+        as_of = utcnow().date()
+
+    trust_accounts = list(
+        db.session.execute(
+            select(BankAccount)
+            .where(
+                BankAccount.org_id == org_id,
+                BankAccount.is_trust.is_(True),
+                BankAccount.deleted_at.is_(None),
+            )
+            .order_by(BankAccount.name)
+        ).scalars()
+    )
+
+    leases = {
+        lease.id: lease
+        for lease in db.session.execute(select(Lease).where(Lease.org_id == org_id)).scalars()
+    }
+
+    accounts: list[_TrustAccountView] = []
+    for account in trust_accounts:
+        balances = deposit_balances(
+            current_session(), org_id=org_id, bank_account_id=account.id, as_of=as_of
+        )
+        holdings = sorted(
+            (
+                _Holding(lease_id=lease_id, lease=leases.get(lease_id), held=held)
+                for lease_id, held in balances.items()
+                if held != Decimal("0")
+            ),
+            key=lambda holding: (holding.lease.lease_number if holding.lease else holding.lease_id),
+        )
+        accounts.append(_TrustAccountView(account=account, holdings=holdings))
+
+    recent = list(
+        db.session.execute(
+            select(DepositMovement)
+            .where(DepositMovement.org_id == org_id)
+            .order_by(DepositMovement.effective_date.desc(), DepositMovement.created_at.desc())
+            .limit(50)
+        ).scalars()
+    )
+
+    return render_template(
+        "admin/deposits.html",
+        accounts=accounts,
+        recent=recent,
+        leases=leases,
+        as_of=as_of,
     )
 
 
@@ -220,7 +313,7 @@ def audit() -> str:
     if can(Perm.AUDIT_EXPORT):
         from app.services.audit.recorder import verify_chain
 
-        integrity = verify_chain(db.session, org_id=org_id)
+        integrity = verify_chain(current_session(), org_id=org_id)
 
     return render_template("admin/audit.html", events=events, integrity=integrity)
 

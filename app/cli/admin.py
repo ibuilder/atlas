@@ -9,7 +9,7 @@ import click
 from flask.cli import AppGroup
 
 from app.context import system_context, use_context
-from app.extensions import db
+from app.extensions import current_session, db
 
 admin_cli = AppGroup("atlas", help="Atlas administrative commands.")
 
@@ -23,10 +23,10 @@ def sync_permissions() -> None:
     from app.services.iam.provisioning import ensure_system_roles, sync_permission_catalog
 
     with use_context(system_context("cli")):
-        changed = sync_permission_catalog(db.session)
+        changed = sync_permission_catalog(current_session())
         organizations = db.session.query(Organization).all()
         for organization in organizations:
-            ensure_system_roles(db.session, organization.id)
+            ensure_system_roles(current_session(), organization.id)
         db.session.commit()
 
     click.echo(f"Permissions synced ({changed} changed) across {len(organizations)} organizations.")
@@ -46,7 +46,7 @@ def verify_audit(org_slug: str) -> None:
         if organization is None:
             raise click.ClickException(f"No organization with slug {org_slug!r}.")
 
-        result = verify_chain(db.session, org_id=organization.id)
+        result = verify_chain(current_session(), org_id=organization.id)
 
     if result["intact"]:
         click.echo(f"Chain intact. {result['events_checked']} events verified.")
@@ -74,7 +74,7 @@ def create_admin(org_slug: str, email: str, name: str, password: str) -> None:
             raise click.ClickException(f"No organization with slug {org_slug!r}.")
 
         user = create_user(
-            db.session,
+            current_session(),
             org_id=organization.id,
             email=email,
             full_name=name,
@@ -103,9 +103,9 @@ def purge_expired() -> None:
     from app.services.iam.session_service import purge_expired_sessions
 
     with use_context(system_context("cli")):
-        sessions = purge_expired_sessions(db.session)
+        sessions = purge_expired_sessions(current_session())
         db.session.commit()
-        keys = purge_idempotency(db.session)
+        keys = purge_idempotency(current_session())
 
     click.echo(f"Purged {sessions} expired sessions and {keys} idempotency records.")
 
@@ -149,7 +149,7 @@ def verify_restore(strict: bool) -> None:
         organizations = list(db.session.execute(select(Organization)).scalars())
     for organization in organizations:
         with use_context(system_context("cli", org_id=organization.id)):
-            result = verify_chain(db.session, org_id=organization.id)
+            result = verify_chain(current_session(), org_id=organization.id)
         if result.get("intact"):
             click.echo(
                 f"  [ok] audit chain intact for {organization.slug} "

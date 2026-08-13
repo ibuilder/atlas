@@ -21,10 +21,20 @@ from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_talisman import Talisman
 from flask_wtf.csrf import CSRFProtect
+from sqlalchemy.orm import Session
 
 from app.models.base import Base
 
-__all__ = ["cache", "csrf", "db", "limiter", "login_manager", "migrate", "talisman"]
+__all__ = [
+    "cache",
+    "csrf",
+    "current_session",
+    "db",
+    "limiter",
+    "login_manager",
+    "migrate",
+    "talisman",
+]
 
 # Bound to our metadata rather than given ``model_class=Base``. Models declare
 # themselves against :class:`~app.models.base.Base`, which owns the constraint
@@ -38,6 +48,24 @@ login_manager = LoginManager()
 csrf = CSRFProtect()
 cache = Cache()
 talisman = Talisman()
+
+
+def current_session() -> Session:
+    """The request's session, typed as the ``Session`` it actually is.
+
+    ``db.session`` is a ``scoped_session``: a thread-local registry that
+    forwards every call to a real ``Session``, but is not one as far as the type
+    checker is concerned. Services are annotated against ``Session`` - correctly,
+    since that is the contract they use and what a Celery task or a test hands
+    them - so passing ``db.session`` straight in is a type error at every one of
+    the sixty-odd call sites in the web and CLI layers.
+
+    Calling the registry returns the very same object it would have proxied to,
+    so this is free at runtime. It exists so the unwrapping happens once, named
+    and explained, rather than as a scattering of casts or an ignore comment on
+    each line.
+    """
+    return db.session()
 
 
 def rate_limit_key() -> str:

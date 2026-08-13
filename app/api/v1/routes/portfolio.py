@@ -21,7 +21,7 @@ from app.api.helpers import (
 )
 from app.api.v1 import api_v1_bp
 from app.errors import NotFound
-from app.extensions import db
+from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.audit import AuditAction
 from app.models.base import model_to_dict
@@ -86,7 +86,7 @@ def list_properties() -> Response:
         pattern = f"%{query.q}%"
         stmt = stmt.where(Property.name.ilike(pattern) | Property.code.ilike(pattern))
 
-    page = paginate(db.session, stmt, Property, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, Property, limit=query.limit, cursor=query.cursor)
     return respond_collection(page, PropertyOut)
 
 
@@ -179,7 +179,7 @@ def list_units() -> Response:
     if query.q:
         stmt = stmt.where(Unit.unit_number.ilike(f"%{query.q}%"))
 
-    page = paginate(db.session, stmt, Unit, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, Unit, limit=query.limit, cursor=query.cursor)
     return respond_collection(page, UnitOut)
 
 
@@ -264,7 +264,7 @@ def list_owners() -> Response:
     if query.q:
         stmt = stmt.where(OwnerEntity.name.ilike(f"%{query.q}%"))
 
-    page = paginate(db.session, stmt, OwnerEntity, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, OwnerEntity, limit=query.limit, cursor=query.cursor)
     return respond_collection(page, OwnerOut)
 
 

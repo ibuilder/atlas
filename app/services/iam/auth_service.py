@@ -86,9 +86,9 @@ class AuthResult:
 
 
 def _db() -> Session:
-    from app.extensions import db
+    from app.extensions import current_session
 
-    return db.session
+    return current_session()
 
 
 def _settings():  # noqa: ANN202

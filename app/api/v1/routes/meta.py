@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 
 from app.api.helpers import paginate, parse_query, respond, respond_collection
 from app.api.v1 import api_v1_bp
-from app.extensions import db
+from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.accounting import Invoice, InvoiceStatus
 from app.models.audit import AuditEvent
@@ -96,7 +96,7 @@ def list_audit_events() -> Response:
     if query.actor_id:
         stmt = stmt.where(AuditEvent.actor_id == query.actor_id)
 
-    page = paginate(db.session, stmt, AuditEvent, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, AuditEvent, limit=query.limit, cursor=query.cursor)
     return respond_collection(page, AuditEventOut)
 
 
@@ -108,7 +108,7 @@ def verify_audit_chain() -> Response:
 
     from app.services.audit.recorder import verify_chain
 
-    return respond(verify_chain(db.session, org_id=org_id))
+    return respond(verify_chain(current_session(), org_id=org_id))
 
 
 @api_v1_bp.get("/dashboard/kpis", endpoint="dashboard_kpis")

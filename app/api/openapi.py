@@ -223,6 +223,8 @@ def _responses(method: str) -> dict[str, Any]:
 
 def _component_schemas() -> dict[str, Any]:
     """JSON Schema for the shared models, generated from pydantic."""
+    from pydantic import BaseModel
+
     from app.schemas.common import ErrorEnvelope, PageInfo
     from app.schemas.operations import (
         InvoiceOut,
@@ -233,7 +235,7 @@ def _component_schemas() -> dict[str, Any]:
     )
     from app.schemas.portfolio import PropertyOut, UnitOut
 
-    models = {
+    models: dict[str, type[BaseModel]] = {
         "ErrorEnvelope": ErrorEnvelope,
         "PageInfo": PageInfo,
         "Property": PropertyOut,

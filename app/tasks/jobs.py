@@ -75,7 +75,13 @@ def escalate_sla_breaches(self) -> dict:  # noqa: ANN001
                         resource_type="WorkOrder",
                         resource_id=work_order.id,
                         resource_label=work_order.work_order_number,
-                        payload={"due_at": work_order.resolution_due_at.isoformat()},
+                        payload={
+                            "due_at": (
+                                work_order.resolution_due_at.isoformat()
+                                if work_order.resolution_due_at
+                                else None
+                            )
+                        },
                         severity=AuditSeverity.WARNING,
                         org_id=organization.id,
                         session=session,

@@ -277,7 +277,9 @@ def create_work_order(
         payload={
             "priority": str(effective_priority),
             "trade": work_order.trade,
-            "resolution_due_at": work_order.resolution_due_at.isoformat(),
+            "resolution_due_at": (
+                work_order.resolution_due_at.isoformat() if work_order.resolution_due_at else None
+            ),
         },
         org_id=org_id,
         session=session,

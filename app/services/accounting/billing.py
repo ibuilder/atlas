@@ -191,7 +191,14 @@ def generate_recurring_charges(
 
         for cycle_end in sorted(cycles):
             entries = cycles[cycle_end]
-            issue_date = min(item[1].service_period_start for item in entries)
+            issue_date = min(
+                (
+                    item[1].service_period_start
+                    for item in entries
+                    if item[1].service_period_start is not None
+                ),
+                default=cycle_end,
+            )
             due_date = _due_date(lease, issue_date)
 
             invoice = issue_invoice(

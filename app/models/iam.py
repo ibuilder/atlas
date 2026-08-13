@@ -303,10 +303,10 @@ class User(TenantModel, SoftDeleteMixin):
         if self.is_platform_admin:
             return True
 
-        from app.extensions import db
+        from app.extensions import current_session, db
         from app.models.base import unscoped
 
-        with unscoped(db.session):
+        with unscoped(current_session()):
             now = utcnow()
             stmt = (
                 select(RoleAssignment.id)

@@ -39,9 +39,9 @@ _TOUCH_INTERVAL_SECONDS = 60
 
 
 def _session() -> Session:
-    from app.extensions import db
+    from app.extensions import current_session
 
-    return db.session
+    return current_session()
 
 
 def load_user_for_session(composite_id: str) -> User | None:

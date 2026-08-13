@@ -99,6 +99,9 @@ class Perm:
     PAYMENT_READ = "payment.read"
     PAYMENT_RECORD = "payment.record"
     PAYMENT_REFUND = "payment.refund"
+    DEPOSIT_READ = "deposit.read"
+    DEPOSIT_COLLECT = "deposit.collect"
+    DEPOSIT_RELEASE = "deposit.release"
     BILL_READ = "bill.read"
     BILL_MANAGE = "bill.manage"
     BILL_APPROVE = "bill.approve"
@@ -255,6 +258,11 @@ PERMISSION_CATALOG: Final[tuple[PermissionDef, ...]] = (
     _p(Perm.PAYMENT_READ, "View payments", "Accounting"),
     _p(Perm.PAYMENT_RECORD, "Record payments", "Accounting"),
     _p(Perm.PAYMENT_REFUND, "Refund payments", "Accounting", sensitive=True),
+    _p(Perm.DEPOSIT_READ, "View deposits held", "Accounting"),
+    _p(Perm.DEPOSIT_COLLECT, "Take deposits into trust", "Accounting"),
+    # Money leaving a trust account belongs to somebody else. Split from
+    # collecting for the same reason entering a bill is split from paying it.
+    _p(Perm.DEPOSIT_RELEASE, "Release deposits from trust", "Accounting", sensitive=True),
     _p(Perm.BILL_READ, "View bills", "Accounting"),
     _p(Perm.BILL_MANAGE, "Manage bills", "Accounting"),
     _p(Perm.BILL_APPROVE, "Approve bills", "Accounting", sensitive=True),
@@ -428,6 +436,8 @@ _ACCOUNTING_OPERATIONS = frozenset(
         Perm.INVOICE_MANAGE,
         Perm.PAYMENT_READ,
         Perm.PAYMENT_RECORD,
+        Perm.DEPOSIT_READ,
+        Perm.DEPOSIT_COLLECT,
         Perm.BILL_READ,
         Perm.BILL_MANAGE,
         Perm.BANK_ACCOUNT_READ,
@@ -456,6 +466,7 @@ _CONTROLLER_OPERATIONS = _ACCOUNTING_OPERATIONS | frozenset(
         Perm.ACCOUNT_MANAGE,
         Perm.INVOICE_VOID,
         Perm.PAYMENT_REFUND,
+        Perm.DEPOSIT_RELEASE,
         Perm.BILL_APPROVE,
         Perm.BILL_PAY,
         Perm.BANK_ACCOUNT_MANAGE,
@@ -475,6 +486,9 @@ _PORTAL_RESIDENT = frozenset(
         Perm.INVOICE_READ,
         Perm.PAYMENT_READ,
         Perm.PAYMENT_RECORD,
+        # Read only. A resident may see what is held for them; whether it comes
+        # back is decided at the disposition, by somebody else.
+        Perm.DEPOSIT_READ,
         Perm.REQUEST_READ,
         Perm.REQUEST_CREATE,
         Perm.WORK_ORDER_READ,

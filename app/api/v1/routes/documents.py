@@ -19,7 +19,7 @@ from app.api.helpers import (
 )
 from app.api.v1 import api_v1_bp
 from app.errors import NotFound, ValidationFailed
-from app.extensions import db
+from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.documents import Document, DocumentCategory, DocumentLink, DocumentVisibility
 from app.schemas.operations import DocumentLinkCreate, DocumentListQuery, DocumentOut
@@ -65,7 +65,7 @@ def list_documents() -> Response:
     if query.q:
         stmt = stmt.where(Document.name.ilike(f"%{query.q}%"))
 
-    page = paginate(db.session, stmt, Document, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, Document, limit=query.limit, cursor=query.cursor)
     return respond_collection(page, DocumentOut)
 
 

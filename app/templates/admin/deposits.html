@@ -1,0 +1,126 @@
+{# Deposits held in trust, per account.
+
+   Per account rather than one list, because an account is the unit a trust
+   reconciliation is performed against - an operator holding one per
+   jurisdiction has to be able to see them apart.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{# `with context`: the macro calls can(), which arrives from a context
+   processor and is invisible to a macro imported without it. #}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Deposits · {{ app_name }}{% endblock %}
+{% block heading %}Deposits held in trust{% endblock %}
+{% block nav %}{{ admin_nav('deposits') }}{% endblock %}
+
+{% block topbar_meta %}
+<form method="get" class="inline-form">
+  <label class="tiny muted" for="as_of">As at</label>
+  <input type="date" id="as_of" name="as_of" value="{{ as_of.isoformat() }}">
+  <button type="submit" class="btn btn--quiet">Show</button>
+</form>
+{% endblock %}
+
+{% block content %}
+
+{% if not accounts %}
+  <div class="panel">
+    <p class="empty">
+      No trust accounts are configured. A security deposit not held in trust is
+      commingled with operating money, which in most jurisdictions is a
+      licensing matter rather than a bookkeeping preference.
+    </p>
+  </div>
+{% endif %}
+
+{% for entry in accounts %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ entry.account.name }}</h2>
+    <span class="panel__hint">
+      {{ entry.holdings | length }} beneficiar{{ 'y' if entry.holdings | length == 1 else 'ies' }}
+      · {{ entry.total | money }} held
+    </span>
+  </div>
+
+  {% if entry.holdings %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Lease</th><th>Property</th><th class="num">Held</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for row in entry.holdings %}
+            <tr>
+              <td class="mono tiny">
+                {{ row.lease.lease_number if row.lease else row.lease_id }}
+              </td>
+              <td class="tiny muted">
+                {{ row.lease.status | humanize if row.lease else '' }}
+              </td>
+              <td class="num">{{ row.held | money }}</td>
+              <td class="num">
+                {% if row.held < 0 %}
+                  {# The trust has paid out more than it held for this lease,
+                     which means it has used somebody else's money. #}
+                  <span class="pill pill--critical">Impossible balance</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="2"><strong>Total owed to beneficiaries</strong></td>
+            <td class="num"><strong>{{ entry.total | money }}</strong></td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nothing held in this account as at {{ as_of.isoformat() }}.</p>
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Recent movements</h2>
+    <span class="panel__hint">Signed: positive took money in, negative let it out</span>
+  </div>
+
+  {% if recent %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Date</th><th>Lease</th><th>Movement</th>
+            <th class="num">Amount</th><th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for movement in recent %}
+            <tr>
+              <td class="tiny">{{ movement.effective_date.isoformat() }}</td>
+              <td class="mono tiny">
+                {% set lease = leases.get(movement.lease_id) %}
+                {{ lease.lease_number if lease else movement.lease_id }}
+              </td>
+              <td class="tiny">{{ movement.kind | humanize }}</td>
+              <td class="num">{{ movement.amount | money }}</td>
+              <td class="tiny muted">{{ movement.reason or '' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">
+      No deposits have been recorded. Until one is, the trust reconciliation has
+      no beneficiary ledger to compare the bank and the books against.
+    </p>
+  {% endif %}
+</div>
+
+{% endblock %}

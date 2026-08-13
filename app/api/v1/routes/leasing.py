@@ -21,7 +21,7 @@ from app.api.helpers import (
 )
 from app.api.v1 import api_v1_bp
 from app.errors import BusinessRuleViolation, NotFound
-from app.extensions import db
+from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.audit import AuditAction
 from app.models.leasing import Lead, Lease, LeaseStatus
@@ -62,7 +62,7 @@ def list_leads() -> Response:
     if query.assigned_to_id:
         stmt = stmt.where(Lead.assigned_to_id == query.assigned_to_id)
 
-    page = paginate(db.session, stmt, Lead, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, Lead, limit=query.limit, cursor=query.cursor)
     return respond_collection(page, LeadOut)
 
 
@@ -105,7 +105,7 @@ def list_residents() -> Response:
         pattern = f"%{query.q}%"
         stmt = stmt.where(Resident.last_name.ilike(pattern) | Resident.first_name.ilike(pattern))
 
-    page = paginate(db.session, stmt, Resident, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, Resident, limit=query.limit, cursor=query.cursor)
     page.items = filter_permitted(Perm.RESIDENT_READ, page.items)
     return respond_collection(page, ResidentOut)
 
@@ -147,7 +147,7 @@ def list_leases() -> Response:
             Lease.status.in_([LeaseStatus.ACTIVE, LeaseStatus.HOLDOVER]),
         )
 
-    page = paginate(db.session, stmt, Lease, limit=query.limit, cursor=query.cursor)
+    page = paginate(current_session(), stmt, Lease, limit=query.limit, cursor=query.cursor)
     page.items = filter_permitted(Perm.LEASE_READ, page.items)
     return respond_collection(page, LeaseOut)
 

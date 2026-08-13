@@ -244,3 +244,220 @@ def test_balances_are_scoped_to_one_account(
 
 def test_a_lease_with_nothing_held_has_no_holding_account(db, org, scope, lease_record):
     assert holding_account_id(db.session, org_id=org.id, lease_id=lease_record.id) is None
+
+
+# ---------------------------------------------------------------------------
+# The API surface
+#
+# The subledger existed before any route reached it, which is the state that
+# made the original defect invisible: correct code nothing could call.
+# ---------------------------------------------------------------------------
+
+
+def _signed_in(org, make_user, sign_in, role):
+    """Sign a role in, then rebind the tenant scope.
+
+    Signing in runs a real request, and the request cycle clears the ambient
+    context on its way out - so a test that touches the database afterwards has
+    to bind its own, the same discipline the application code is held to.
+    """
+    from app.context import RequestContext, bind_context, clear_context, new_correlation_id
+
+    email = f"{role}@test.local"
+    make_user(role, email=email)
+    sign_in(email)
+    token = bind_context(
+        RequestContext(
+            correlation_id=new_correlation_id(),
+            org_id=org.id,
+            actor_type="system",
+            source="test",
+        )
+    )
+    yield email
+    clear_context(token)
+
+
+@pytest.fixture()
+def controller(db, org, scope, trust_account, make_user, sign_in):
+    """Holds DEPOSIT_RELEASE. An accountant deliberately does not."""
+    yield from _signed_in(org, make_user, sign_in, "controller")
+
+
+@pytest.fixture()
+def accountant(db, org, scope, trust_account, make_user, sign_in):
+    yield from _signed_in(org, make_user, sign_in, "accountant")
+
+
+def test_collecting_through_the_api(client, db, org, controller, trust_account, lease_record):
+    response = client.post(
+        "/api/v1/deposits/collect",
+        json={
+            "lease_id": lease_record.id,
+            "bank_account_id": trust_account.id,
+            "amount": "2400.00",
+            "effective_date": MAY.isoformat(),
+        },
+    )
+    assert response.status_code == 201, response.get_data(as_text=True)[:400]
+    body = response.get_json()
+    assert Decimal(body["amount"]) == Decimal("2400.0000")
+    assert body["journal_entry_id"]
+
+
+def test_the_balance_endpoint_answers_as_at_a_date(
+    client, db, org, controller, trust_account, lease_record
+):
+    for amount, on in ((Decimal("2400.00"), MAY), (Decimal("600.00"), MAY + dt.timedelta(days=40))):
+        collect_deposit(
+            db.session,
+            org_id=org.id,
+            lease_id=lease_record.id,
+            bank_account_id=trust_account.id,
+            amount=amount,
+            effective_date=on,
+        )
+    db.session.commit()
+
+    at_may = client.get(
+        f"/api/v1/leases/{lease_record.id}/deposit?as_of={(MAY + dt.timedelta(days=1)).isoformat()}"
+    )
+    assert Decimal(at_may.get_json()["held"]) == Decimal("2400.0000")
+
+    later = client.get(
+        f"/api/v1/leases/{lease_record.id}/deposit?as_of={(MAY + dt.timedelta(days=60)).isoformat()}"
+    )
+    assert Decimal(later.get_json()["held"]) == Decimal("3000.0000")
+
+
+def test_an_accountant_cannot_release(client, db, org, accountant, trust_account, lease_record):
+    """Taking money in is routine; letting it out of a trust is not.
+
+    Split for the same reason entering a bill is split from paying it.
+    """
+    collect_deposit(
+        db.session,
+        org_id=org.id,
+        lease_id=lease_record.id,
+        bank_account_id=trust_account.id,
+        amount=Decimal("2400.00"),
+        effective_date=MAY,
+    )
+    db.session.commit()
+
+    allowed = client.post(
+        "/api/v1/deposits/collect",
+        json={
+            "lease_id": lease_record.id,
+            "bank_account_id": trust_account.id,
+            "amount": "100.00",
+        },
+    )
+    refused = client.post(
+        "/api/v1/deposits/release",
+        json={
+            "lease_id": lease_record.id,
+            "bank_account_id": trust_account.id,
+            "amount": "100.00",
+        },
+    )
+    assert allowed.status_code == 201
+    assert refused.status_code == 403
+
+
+def test_a_collect_kind_is_refused_on_the_release_endpoint(
+    client, db, org, controller, trust_account, lease_record
+):
+    response = client.post(
+        "/api/v1/deposits/release",
+        json={
+            "lease_id": lease_record.id,
+            "bank_account_id": trust_account.id,
+            "amount": "100.00",
+            "kind": "collected",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_another_tenants_lease_is_not_found(client, db, org, other_org, controller, trust_account):
+    """404 rather than 403, so the endpoint is not a lease enumerator."""
+    from app.context import RequestContext, bind_context, clear_context, new_correlation_id
+    from app.models.leasing import Lease, LeaseStatus
+    from app.models.org import Property, PropertyType, Unit, UnitStatus
+    from app.models.sequences import SequenceKey
+    from app.services.common.numbering import next_number
+
+    token = bind_context(
+        RequestContext(
+            correlation_id=new_correlation_id(),
+            org_id=other_org.id,
+            actor_type="system",
+            source="test",
+        )
+    )
+    try:
+        prop = Property(
+            org_id=other_org.id,
+            code="RIV",
+            name="Rival",
+            property_type=PropertyType.RESIDENTIAL_MULTI,
+            address_line1="1 Rival Way",
+            city="Elsewhere",
+            region="RS",
+            postal_code="99999",
+        )
+        db.session.add(prop)
+        db.session.flush()
+        unit = Unit(
+            org_id=other_org.id,
+            property_id=prop.id,
+            unit_number="1A",
+            status=UnitStatus.OCCUPIED,
+            market_rent=Decimal("5000.00"),
+        )
+        db.session.add(unit)
+        db.session.flush()
+        theirs = Lease(
+            org_id=other_org.id,
+            lease_number=next_number(db.session, SequenceKey.LEASE, org_id=other_org.id),
+            property_id=prop.id,
+            unit_id=unit.id,
+            status=LeaseStatus.ACTIVE,
+            start_date=MAY,
+            end_date=MAY + dt.timedelta(days=364),
+            rent_amount=Decimal("5000.00"),
+            security_deposit=Decimal("5000.00"),
+        )
+        db.session.add(theirs)
+        db.session.commit()
+    finally:
+        clear_context(token)
+
+    assert client.get(f"/api/v1/leases/{theirs.id}/deposit").status_code == 404
+
+    refused = client.post(
+        "/api/v1/deposits/collect",
+        json={
+            "lease_id": theirs.id,
+            "bank_account_id": trust_account.id,
+            "amount": "100.00",
+        },
+    )
+    assert refused.status_code == 404
+
+
+def test_movements_are_listable(client, db, org, controller, trust_account, lease_record):
+    collect_deposit(
+        db.session,
+        org_id=org.id,
+        lease_id=lease_record.id,
+        bank_account_id=trust_account.id,
+        amount=Decimal("2400.00"),
+        effective_date=MAY,
+    )
+    db.session.commit()
+
+    response = client.get(f"/api/v1/deposits?lease_id={lease_record.id}")
+    assert response.status_code == 200
+    assert len(response.get_json()["data"]) == 1

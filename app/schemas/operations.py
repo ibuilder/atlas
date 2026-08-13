@@ -11,7 +11,12 @@ from typing import Annotated, Any
 
 from pydantic import Field, StringConstraints, model_validator
 
-from app.models.accounting import InvoiceStatus, PaymentMethod, PaymentStatus
+from app.models.accounting import (
+    DepositMovementKind,
+    InvoiceStatus,
+    PaymentMethod,
+    PaymentStatus,
+)
 from app.models.documents import DocumentCategory, DocumentVisibility
 from app.models.leasing import ApplicationStatus, LeadStatus, LeaseStatus
 from app.models.maintenance import Priority, RequestStatus, WorkOrderStatus
@@ -29,6 +34,11 @@ Phone = Annotated[str, StringConstraints(max_length=40)]
 
 __all__ = [
     "ApplicationDecision",
+    "DepositBalanceOut",
+    "DepositCollect",
+    "DepositMovementListQuery",
+    "DepositMovementOut",
+    "DepositRelease",
     "DocumentOut",
     "InvoiceOut",
     "LeadCreate",
@@ -268,6 +278,59 @@ class PaymentOut(AtlasResponse):
     resident_id: str | None = None
     reference: str | None = None
     created_at: dt.datetime
+
+
+class DepositMovementListQuery(ListQuery):
+    lease_id: str | None = None
+    bank_account_id: str | None = None
+    #: Balances and movements at a date rather than now. A disposition is
+    #: argued about months later, against what was held at the time.
+    as_of: dt.date | None = None
+
+
+class DepositCollect(AtlasRequest):
+    lease_id: str
+    bank_account_id: str
+    amount: Decimal = Field(gt=0)
+    effective_date: dt.date | None = None
+    reason: Annotated[str, StringConstraints(max_length=255)] | None = None
+
+
+class DepositRelease(AtlasRequest):
+    lease_id: str
+    bank_account_id: str
+    amount: Decimal = Field(gt=0)
+    #: Why it left. ``returned`` goes to the resident, ``applied`` covers
+    #: damage or arrears, ``forfeited`` is neither.
+    kind: DepositMovementKind = DepositMovementKind.RETURNED
+    effective_date: dt.date | None = None
+    reason: Annotated[str, StringConstraints(max_length=255)] | None = None
+
+    @model_validator(mode="after")
+    def _must_release(self) -> DepositRelease:
+        if self.kind in (DepositMovementKind.COLLECTED, DepositMovementKind.ADJUSTMENT):
+            raise ValueError(f"{self.kind} does not release money from the trust")
+        return self
+
+
+class DepositMovementOut(AtlasResponse):
+    id: str
+    lease_id: str
+    bank_account_id: str
+    #: Signed: positive took money in, negative let it out.
+    amount: Decimal
+    effective_date: dt.date
+    kind: DepositMovementKind
+    reason: str | None = None
+    journal_entry_id: str | None = None
+    created_at: dt.datetime
+
+
+class DepositBalanceOut(AtlasResponse):
+    lease_id: str
+    bank_account_id: str | None = None
+    as_of: dt.date
+    held: Decimal
 
 
 class JournalLineIn(AtlasRequest):

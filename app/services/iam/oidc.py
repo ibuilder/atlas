@@ -291,7 +291,7 @@ def verify_id_token(
         raise AuthenticationRequired("That identity token is malformed.") from exc
 
     algorithm = header.get("alg")
-    if algorithm in (None, "none", "HS256", "HS384", "HS512"):
+    if not isinstance(algorithm, str) or algorithm in ("none", "HS256", "HS384", "HS512"):
         # A symmetric algorithm here means the token is signed with something we
         # would have to share; "none" means it is not signed at all. Both are
         # the classic JWT confusion attacks.

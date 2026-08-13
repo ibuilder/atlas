@@ -46,9 +46,9 @@ def issue_api_token(
 ) -> tuple[ApiToken, str]:
     """Mint a token. The plaintext is returned once and never stored."""
     if session is None:
-        from app.extensions import db
+        from app.extensions import current_session
 
-        session = db.session
+        session = current_session()
 
     for cidr in allowed_ips or []:
         # Validate now: a malformed CIDR that silently never matches would lock
@@ -73,9 +73,9 @@ def issue_api_token(
 
 def revoke_api_token(token: ApiToken, session: Session | None = None) -> None:
     if session is None:
-        from app.extensions import db
+        from app.extensions import current_session
 
-        session = db.session
+        session = current_session()
     token.revoked_at = utcnow()
     session.flush()
 
@@ -93,10 +93,11 @@ def authenticate_request_token(req: Request) -> User | None:
     if not value.startswith(f"{TOKEN_PREFIX}_"):
         return None
 
-    from app.extensions import db
+    from app.extensions import current_session
 
-    with unscoped(db.session):
-        token = db.session.execute(
+    session = current_session()
+    with unscoped(session):
+        token = session.execute(
             select(ApiToken).where(ApiToken.token_hash == hash_token(value))
         ).scalar_one_or_none()
 
@@ -118,7 +119,7 @@ def authenticate_request_token(req: Request) -> User | None:
             )
             return None
 
-        user = db.session.get(User, token.user_id) if token.user_id else None
+        user = session.get(User, token.user_id) if token.user_id else None
         if user is None or not user.is_active:
             return None
 
