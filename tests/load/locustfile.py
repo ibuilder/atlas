@@ -47,13 +47,10 @@ except ImportError:  # pragma: no cover - locust is an optional dev dependency
         "imports it, and a load tool in the production image is a liability."
     ) from None
 
-#: From the 1.0 checklist. Milliseconds, at the 95th percentile.
-BUDGETS = {
-    "read": 300,
-    "write": 700,
-    #: Reports touch half the ledger and are run deliberately, not incidentally.
-    "report": 5_000,
-}
+#: The pass/fail arithmetic lives beside this file rather than in it, so the
+#: one function that decides whether a run *passed* can be tested without
+#: locust installed. See ``tests/load/budgets.py``.
+from tests.load.budgets import BUDGETS, Measurement, breaches  # noqa: E402, F401
 
 #: The seeded demo accounts. Load against a seeded deployment only: an empty
 #: database measures an index that fits in L2 cache.
@@ -183,24 +180,23 @@ def _report_against_budgets(environment, **_kwargs) -> None:
     load test nobody runs twice.
     """
     stats = environment.stats
-    breaches: list[str] = []
 
-    for name, entry in stats.entries.items():
-        label = name[0] if isinstance(name, tuple) else name
-        kind = str(label).split(":", 1)[0]
-        budget = BUDGETS.get(kind)
-        if budget is None or entry.num_requests == 0:
-            continue
-        p95 = entry.get_response_time_percentile(0.95)
-        if p95 and p95 > budget:
-            breaches.append(f"{label}: P95 {p95:.0f}ms exceeds the {budget}ms budget")
+    # The arithmetic lives in ``budgets`` so it can be tested without locust
+    # installed. This function's only job is turning locust's statistics into
+    # measurements and setting the exit code.
+    measured = [
+        Measurement(
+            name=name[0] if isinstance(name, tuple) else str(name),
+            requests=entry.num_requests,
+            p95_ms=entry.get_response_time_percentile(0.95) or 0.0,
+        )
+        for name, entry in stats.entries.items()
+    ]
+    found = breaches(measured, fail_ratio=stats.total.fail_ratio)
 
-    if stats.total.fail_ratio > 0.01:
-        breaches.append(f"failure rate {stats.total.fail_ratio:.2%} exceeds 1%")
-
-    if breaches:
+    if found:
         print("\nBudget breaches:")  # noqa: T201 - this is a CLI tool
-        for breach in breaches:
+        for breach in found:
             print(f"  - {breach}")  # noqa: T201
         environment.process_exit_code = 1
     else:

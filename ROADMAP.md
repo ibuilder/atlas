@@ -196,7 +196,11 @@ portfolio on this:
 - [ ] **Load tested** to the stated budgets: P95 < 300ms reads, < 700ms writes.
       Needs production-shaped hardware and data volumes. The harness exists and
       fails the run on a breach — see [tests/load/](tests/load/README.md) — so
-      what is missing is somewhere to run it, not something to run.
+      what is missing is somewhere to run it, not something to run. The verdict
+      logic is now separated from the locust profile and covered by the ordinary
+      suite (`tests/unit/test_load_budgets.py`), because it previously could not
+      be imported without locust installed and had therefore never executed —
+      a load test whose pass/fail arithmetic is wrong is worse than none.
 - [ ] **Penetration test** against the authorization and tenancy boundaries, by
       somebody who did not write them. `tests/security/test_attack_surface.py`
       is the starting point that test should not have to rediscover; it is
