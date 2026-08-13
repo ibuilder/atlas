@@ -122,6 +122,13 @@ class AuditAction:
     LEASE_TERMINATED = "lease.terminated"
     LEASE_RENEWED = "lease.renewed"
 
+    # Messaging. The *thread* is audited, not each message: a conversation
+    # that was opened, assigned, and closed is the record somebody asks about,
+    # and one event per reply would bury everything else in the chain.
+    THREAD_OPENED = "message.thread_opened"
+    THREAD_ASSIGNED = "message.thread_assigned"
+    THREAD_RESOLVED = "message.thread_resolved"
+
     # Collections
     NOTICE_ISSUED = "notice.issued"
     LATE_FEE_ASSESSED = "collections.late_fee_assessed"

@@ -50,7 +50,7 @@ feature list is how a buyer discovers the gap during implementation.
 |---|---|---|
 | Organizations, portfolios, properties, units | **Complete** | Full CRUD via API, listing in the console. |
 | Buildings and spaces | **Complete** | See the space hierarchy above: nestable, traversable, and the tree invariants are enforced. |
-| Owners and temporal ownership stakes | **Partial** | Owners are creatable and drive the owner portal; stake transfer has no workflow. |
+| Owners and temporal ownership stakes | **Complete** | Stakes are time-bounded, and a transfer closes the outgoing one the day before rather than editing it - so a statement for any earlier period still resolves the owners who actually held the asset then. The invariant enforced is that a transfer preserves the total: a property owned at all totals exactly 100%, checked after every move, because a transfer that drops four percent does not fail, it silently under-distributes for ever. |
 
 ## Leasing
 
@@ -99,7 +99,7 @@ feature list is how a buyer discovers the gap during implementation.
 | Resident portal | **Complete** | Balance, lease, invoices, and request history, plus paying an invoice and reporting a fault from the portal itself. An empty amount box pays the balance; overpayment is refused, because a typo there mints a credit somebody has to chase. |
 | Owner portal | **Complete** | Properties, receivables, open work, and the statements themselves - list and detail, with the arithmetic and the day-weighted ownership share that produced them. |
 | Vendor portal | **Complete** | Assigned work and compliance standing, plus accepting, starting, holding, and completing a job with its labour and material costs entered on site. Cancelling, reassigning, and verifying stay with the management company. |
-| Messaging and notices | **Partial** | Delinquency notices are issued with delivery evidence and statutory response deadlines; general messaging threads remain modelled only. |
+| Messaging and notices | **Complete** | Delinquency notices are issued with delivery evidence and statutory response deadlines. General threads are anchored to what they are about (a lease, a work order, an application) and reach all three portals. Visibility is a property of the thread rather than of the reader: an internal thread is excluded by the query the portals must use, not by a template filter one refactor away from being dropped. |
 
 ## Documents and assets
 

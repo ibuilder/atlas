@@ -1,0 +1,67 @@
+{# Conversations, for whichever portal the caller belongs to.
+
+   One template for all three: the thread list is the same question in each
+   case, and which threads it contains was decided by `visible_threads` before
+   this page was reached. Nothing here filters - a filter in a template is one
+   refactor away from being dropped.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}Messages · {{ app_name }}{% endblock %}
+{% block heading %}Messages{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Your conversations</h2>
+    <span class="panel__hint">{{ threads | length }} open with the office</span>
+  </div>
+
+  {% if threads %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Subject</th><th>Status</th><th>Last message</th></tr>
+        </thead>
+        <tbody>
+          {% for thread in threads %}
+            <tr>
+              <td>
+                <a href="{{ url_for(request.blueprint ~ '.message_thread', thread_id=thread.id) }}">
+                  {{ thread.title }}
+                </a>
+              </td>
+              <td class="tiny">{{ thread.status | humanize }}</td>
+              <td class="tiny muted">
+                {{ thread.last_message_at.strftime('%Y-%m-%d %H:%M') if thread.last_message_at else '—' }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nothing yet. Anything you send here reaches the office.</p>
+  {% endif %}
+</div>
+
+{% if request.blueprint == 'resident' %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Start a conversation</h2>
+  </div>
+  <form method="post" action="{{ url_for('resident.message_start') }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="title">Subject</label>
+    <input type="text" id="title" name="title" maxlength="255" required>
+    <label for="body">Message</label>
+    <textarea id="body" name="body" rows="5" maxlength="10000" required></textarea>
+    <button type="submit" class="btn">Send</button>
+  </form>
+</div>
+{% endif %}
+
+<p class="tiny">
+  <a href="{{ url_for(home_endpoint) }}">Back to your portal</a>
+</p>
+{% endblock %}

@@ -1,0 +1,73 @@
+{# Who owns what, as at a date.
+
+   The date control is the substance of this page rather than a convenience on
+   it: ownership is the input to every owner statement, and the figure that
+   matters is the one for the period being distributed, not for today.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{# `with context`: the macro calls can(), which arrives from a context
+   processor and is invisible to a macro imported without it. #}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Ownership · {{ app_name }}{% endblock %}
+{% block heading %}Ownership{% endblock %}
+{% block nav %}{{ admin_nav('ownership') }}{% endblock %}
+
+{% block topbar_meta %}
+<form method="get" class="inline-form">
+  <label class="tiny muted" for="as_of">As at</label>
+  <input type="date" id="as_of" name="as_of" value="{{ as_of.isoformat() }}">
+  <button type="submit" class="btn btn--quiet">Show</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Holdings on {{ as_of.isoformat() }}</h2>
+    <span class="panel__hint">{{ rows | length }} properties</span>
+  </div>
+
+  {% if rows %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Property</th><th>Owners</th><th class="num">Allocated</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>
+                {{ row.record.name }}
+                <span class="mono tiny muted">{{ row.record.code }}</span>
+              </td>
+              <td>
+                {% if row.holders %}
+                  {% for holder in row.holders %}
+                    <div class="tiny">
+                      {{ holder.owner.name if holder.owner else holder.owner_entity_id }}
+                      — {{ holder.percentage }}%
+                      <span class="muted">since {{ holder.since.isoformat() }}</span>
+                    </div>
+                  {% endfor %}
+                {% else %}
+                  <span class="tiny muted">No equity record on file</span>
+                {% endif %}
+              </td>
+              <td class="num">{{ row.total }}%</td>
+              <td class="num">
+                {% if not row.is_fully_allocated %}
+                  {# A share nobody holds never reaches an owner statement. #}
+                  <span class="pill pill--critical">Under-allocated</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No properties yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

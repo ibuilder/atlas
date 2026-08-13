@@ -1,0 +1,43 @@
+{# One conversation, office side.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ thread.title }} · {{ app_name }}{% endblock %}
+{% block heading %}{{ thread.title }}{% endblock %}
+{% block nav %}{{ admin_nav('messages') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if thread.is_internal %}
+  <span class="pill">Internal — never shown in a portal</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Messages</h2>
+    <span class="panel__hint">{{ thread.status | humanize }}</span>
+  </div>
+
+  {% if thread.messages %}
+    <ol class="timeline">
+      {% for message in thread.messages %}
+        <li class="timeline__item">
+          <div class="tiny muted">
+            {{ message.sender_label }}
+            · {{ message.direction | humanize }}
+            · {{ message.created_at.strftime('%Y-%m-%d %H:%M') }}
+          </div>
+          {# Escaped, not marked safe. #}
+          <p>{{ message.body }}</p>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="empty">No messages yet.</p>
+  {% endif %}
+</div>
+
+<p class="tiny"><a href="{{ url_for('admin.messages') }}">All conversations</a></p>
+{% endblock %}

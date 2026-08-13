@@ -663,3 +663,131 @@ def test_an_owner_cannot_read_another_owners_statement(
 
 def test_an_anonymous_visitor_cannot_read_statements(client):
     assert client.get("/owner/statements").status_code in (302, 401)
+
+
+# ---------------------------------------------------------------------------
+# Messaging
+#
+# The boundary here is disclosure rather than money: an internal thread reaching
+# the resident it is about is the failure this is written to catch.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def threads(db, org, scope, tenancy, lease_record):
+    """One thread the resident may read, one internal one they may not."""
+    from app.services.notifications.messaging import open_thread, post_message
+
+    shared = open_thread(
+        db.session,
+        org_id=org.id,
+        title="Kitchen tap",
+        subject_type="lease",
+        subject_id=lease_record.id,
+    )
+    post_message(db.session, thread=shared, body="Somebody will call.", sender_label="Office")
+
+    internal = open_thread(
+        db.session,
+        org_id=org.id,
+        title="Escalation history",
+        subject_type="lease",
+        subject_id=lease_record.id,
+        is_internal=True,
+    )
+    post_message(
+        db.session,
+        thread=internal,
+        body="Third complaint this month. Check the file before replying.",
+        sender_label="Dana Whitfield",
+    )
+    db.session.commit()
+    return {"shared": shared, "internal": internal}
+
+
+def test_a_resident_sees_their_thread_in_the_portal(client, db, tenancy, threads):
+    _sign_in_resident(client)
+    body = client.get("/resident/messages").get_data(as_text=True)
+
+    assert "Kitchen tap" in body
+    assert "Escalation history" not in body
+
+
+def test_an_internal_thread_is_not_found_by_direct_url(client, db, tenancy, threads):
+    """404 rather than 403: a 403 would confirm the thread exists."""
+    _sign_in_resident(client)
+    response = client.get(f"/resident/messages/{threads['internal'].id}")
+    assert response.status_code == 404
+
+
+def test_the_internal_body_never_reaches_the_portal(client, db, tenancy, threads):
+    """The disclosure itself, asserted on the rendered bytes."""
+    _sign_in_resident(client)
+    for path in ("/resident/messages", f"/resident/messages/{threads['shared'].id}"):
+        body = client.get(path).get_data(as_text=True)
+        assert "Check the file before replying" not in body
+
+
+def test_a_resident_can_reply(client, db, org, tenancy, threads):
+    _sign_in_resident(client)
+    response = client.post(
+        f"/resident/messages/{threads['shared'].id}/reply",
+        data={"body": "Thursday suits me."},
+    )
+    assert response.status_code == 302
+
+    from app.context import clear_context
+    from app.models.resident import Message, MessageDirection
+
+    db.session.expire_all()
+    token = _rebound(org)
+    try:
+        replies = [
+            message
+            for message in db.session.query(Message).all()
+            if message.direction == MessageDirection.INBOUND
+        ]
+    finally:
+        clear_context(token)
+    assert [message.body for message in replies] == ["Thursday suits me."]
+
+
+def test_a_resident_can_start_a_thread(client, db, org, tenancy):
+    _sign_in_resident(client)
+    response = client.post(
+        "/resident/messages",
+        data={"title": "Parking space", "body": "Can I swap bays?"},
+    )
+    assert response.status_code == 302
+
+    from app.context import clear_context
+    from app.models.resident import MessageThread
+
+    db.session.expire_all()
+    token = _rebound(org)
+    try:
+        titles = [thread.title for thread in db.session.query(MessageThread).all()]
+    finally:
+        clear_context(token)
+    assert "Parking space" in titles
+
+
+def test_an_empty_reply_is_refused(client, db, org, tenancy, threads):
+    _sign_in_resident(client)
+    response = client.post(f"/resident/messages/{threads['shared'].id}/reply", data={"body": "   "})
+    assert response.status_code == 302
+
+    from app.context import clear_context
+    from app.models.resident import Message
+
+    db.session.expire_all()
+    token = _rebound(org)
+    try:
+        assert db.session.query(Message).count() == 2  # the two seeded, none added
+    finally:
+        clear_context(token)
+
+
+def test_an_anonymous_visitor_cannot_read_messages(client, threads):
+    response = client.get("/resident/messages")
+    assert response.status_code in (302, 401)

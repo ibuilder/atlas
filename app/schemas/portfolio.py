@@ -26,6 +26,10 @@ __all__ = [
     "OrganizationOut",
     "OwnerCreate",
     "OwnerOut",
+    "OwnershipStakeCreate",
+    "OwnershipStakeOut",
+    "OwnershipTransferIn",
+    "OwnershipTransferOut",
     "PortfolioCreate",
     "PortfolioOut",
     "PropertyCreate",
@@ -220,3 +224,50 @@ class OwnerOut(AtlasResponse):
     reserve_amount: Decimal
     portal_enabled: bool
     created_at: dt.datetime
+
+
+# ---------------------------------------------------------------- ownership
+
+
+class OwnershipStakeOut(AtlasResponse):
+    id: str
+    property_id: str
+    owner_entity_id: str
+    percentage: Decimal
+    effective_from: dt.date
+    #: Open-ended means "still held". A closed stake is history, not a mistake.
+    effective_to: dt.date | None = None
+    is_primary_contact: bool
+
+
+class OwnershipStakeCreate(AtlasRequest):
+    owner_entity_id: str
+    percentage: Decimal = Field(gt=0, le=100)
+    effective_from: dt.date
+    is_primary_contact: bool = False
+
+
+class OwnershipTransferIn(AtlasRequest):
+    from_owner_entity_id: str
+    to_owner_entity_id: str
+    effective_from: dt.date
+    #: Omitted transfers the seller's whole holding.
+    percentage: Decimal | None = Field(default=None, gt=0, le=100)
+    reason: Annotated[str, StringConstraints(max_length=255)] | None = None
+
+    @model_validator(mode="after")
+    def _not_to_themselves(self) -> OwnershipTransferIn:
+        if self.from_owner_entity_id == self.to_owner_entity_id:
+            raise ValueError("an owner cannot transfer a stake to themselves")
+        return self
+
+
+class OwnershipTransferOut(AtlasResponse):
+    property_id: str
+    effective_from: dt.date
+    percentage: Decimal
+    from_owner_entity_id: str
+    to_owner_entity_id: str
+    closed_stake_id: str
+    opened_stake_id: str
+    retained_stake_id: str | None = None

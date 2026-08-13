@@ -1,0 +1,64 @@
+{# One conversation.
+
+   Bodies are stored as text and escaped here. Storing pre-rendered HTML would
+   make every future output context depend on a sanitiser decision taken once,
+   years ago, by somebody who has left.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}{{ thread.title }} · {{ app_name }}{% endblock %}
+{% block heading %}{{ thread.title }}{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Conversation</h2>
+    <span class="panel__hint">{{ thread.status | humanize }}</span>
+  </div>
+
+  {% if thread.messages %}
+    <ol class="timeline">
+      {% for message in thread.messages %}
+        <li class="timeline__item">
+          <div class="tiny muted">
+            {{ message.sender_label }}
+            · {{ message.created_at.strftime('%Y-%m-%d %H:%M') }}
+            {% if message.channel.value != 'portal' %}
+              · {{ message.channel | humanize }}
+            {% endif %}
+          </div>
+          {# Escaped, not marked safe. #}
+          <p>{{ message.body }}</p>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="empty">No messages yet.</p>
+  {% endif %}
+</div>
+
+{% if thread.status != 'resolved' %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Reply</h2>
+  </div>
+  <form method="post"
+        action="{{ url_for(request.blueprint ~ '.message_reply', thread_id=thread.id) }}"
+        class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="body">Message</label>
+    <textarea id="body" name="body" rows="5" maxlength="10000" required></textarea>
+    <button type="submit" class="btn">Send</button>
+  </form>
+</div>
+{% else %}
+  <p class="tiny muted">
+    This conversation is resolved. Start a new one if something else comes up.
+  </p>
+{% endif %}
+
+<p class="tiny">
+  <a href="{{ url_for(request.blueprint ~ '.messages') }}">All messages</a>
+  · <a href="{{ url_for(home_endpoint) }}">Back to your portal</a>
+</p>
+{% endblock %}

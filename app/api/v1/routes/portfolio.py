@@ -5,7 +5,10 @@ SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 
-from flask import Response
+import datetime as dt
+
+from flask import Response, request
+from flask_login import current_user
 from sqlalchemy import select
 
 from app.api.helpers import (
@@ -20,15 +23,20 @@ from app.api.helpers import (
     respond_created,
 )
 from app.api.v1 import api_v1_bp
-from app.errors import NotFound
+from app.errors import NotFound, ValidationFailed
 from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.audit import AuditAction
 from app.models.base import model_to_dict
 from app.models.org import OwnerEntity, Property, Unit
+from app.models.types import utcnow
 from app.schemas.portfolio import (
     OwnerCreate,
     OwnerOut,
+    OwnershipStakeCreate,
+    OwnershipStakeOut,
+    OwnershipTransferIn,
+    OwnershipTransferOut,
     PropertyCreate,
     PropertyListQuery,
     PropertyOut,
@@ -42,6 +50,7 @@ from app.security.permissions import Perm
 from app.security.policies import require
 from app.services.audit.recorder import diff_payload, record_audit_event
 from app.services.common.unit_of_work import transaction
+from app.services.portfolio import ownership
 
 __all__ = []
 
@@ -291,4 +300,129 @@ def create_owner() -> Response:
     return respond_created(
         OwnerOut.model_validate(record, from_attributes=True),
         location=f"/api/v1/owners/{record.id}",
+    )
+
+
+# ---------------------------------------------------------------- ownership
+#
+# Ownership decides who receives money, so the write paths here are audited as
+# warnings and gated on OWNER_MANAGE rather than the ordinary property scope.
+
+
+@api_v1_bp.get("/properties/<id:property_id>/ownership", endpoint="ownership_list")
+def list_ownership(property_id: str) -> Response:
+    """Stakes covering a date, or the whole history.
+
+    ``as_of`` answers "who owned this in March"; omitting it with
+    ``history=true`` answers "who has ever owned it", which is the question
+    asked when an owner disputes a statement.
+    """
+    require(Perm.OWNER_READ)
+    org_id = require_org_scope()
+
+    record = db.session.get(Property, property_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That property was not found.")
+
+    if (request.args.get("history") or "").lower() in ("1", "true", "yes"):
+        timeline = ownership.ownership_timeline(
+            current_session(), org_id=org_id, property_id=property_id
+        )
+        return respond(
+            {
+                "data": [
+                    {
+                        "stake_id": period.stake_id,
+                        "owner_entity_id": period.owner_entity_id,
+                        "percentage": str(period.percentage),
+                        "effective_from": period.effective_from.isoformat(),
+                        "effective_to": (
+                            period.effective_to.isoformat() if period.effective_to else None
+                        ),
+                        "is_current": period.is_current,
+                    }
+                    for period in timeline
+                ]
+            }
+        )
+
+    raw = (request.args.get("as_of") or "").strip()
+    try:
+        as_of = dt.date.fromisoformat(raw) if raw else utcnow().date()
+    except ValueError as exc:
+        raise ValidationFailed(f"'as_of' is not a date: {raw!r}.") from exc
+
+    stakes = ownership.ownership_on(
+        current_session(), org_id=org_id, property_id=property_id, on_date=as_of
+    )
+    return respond(
+        {
+            "data": [
+                OwnershipStakeOut.model_validate(stake, from_attributes=True).model_dump(
+                    mode="json"
+                )
+                for stake in stakes
+            ],
+            "as_of": as_of.isoformat(),
+            "total_percentage": str(
+                ownership.total_allocated(
+                    current_session(), org_id=org_id, property_id=property_id, on_date=as_of
+                )
+            ),
+        }
+    )
+
+
+@api_v1_bp.post("/properties/<id:property_id>/ownership", endpoint="ownership_create")
+def create_ownership_stake(property_id: str) -> Response:
+    """Establish a stake. Use the transfer endpoint to move one."""
+    require(Perm.OWNER_MANAGE)
+    payload = parse_body(OwnershipStakeCreate)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        stake = ownership.record_initial_stake(
+            session,
+            org_id=org_id,
+            property_id=property_id,
+            owner_entity_id=payload.owner_entity_id,
+            percentage=payload.percentage,
+            effective_from=payload.effective_from,
+            is_primary_contact=payload.is_primary_contact,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        OwnershipStakeOut.model_validate(stake, from_attributes=True),
+        location=f"/api/v1/properties/{property_id}/ownership",
+    )
+
+
+@api_v1_bp.post("/properties/<id:property_id>/ownership/transfer", endpoint="ownership_transfer")
+def transfer_ownership_stake(property_id: str) -> Response:
+    """Move a share from one owner to another with effect from a date.
+
+    The outgoing stake is closed rather than edited, so a statement for any
+    earlier period still resolves the owners who actually held the asset then.
+    """
+    require(Perm.OWNER_MANAGE)
+    payload = parse_body(OwnershipTransferIn)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        transfer = ownership.transfer_ownership(
+            session,
+            org_id=org_id,
+            property_id=property_id,
+            from_owner_entity_id=payload.from_owner_entity_id,
+            to_owner_entity_id=payload.to_owner_entity_id,
+            effective_from=payload.effective_from,
+            percentage=payload.percentage,
+            reason=payload.reason,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        OwnershipTransferOut.model_validate(transfer, from_attributes=True),
+        location=f"/api/v1/properties/{property_id}/ownership",
     )

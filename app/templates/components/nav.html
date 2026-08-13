@@ -14,6 +14,14 @@
     <a class="sidebar__link" href="{{ url_for('admin.work_orders') }}"
        {% if active == 'work_orders' %}aria-current="page"{% endif %}>Work orders</a>
   {% endif %}
+  {% if can('owner.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.ownership') }}"
+       {% if active == 'ownership' %}aria-current="page"{% endif %}>Ownership</a>
+  {% endif %}
+  {% if can('message.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.messages') }}"
+       {% if active == 'messages' %}aria-current="page"{% endif %}>Messages</a>
+  {% endif %}
 </div>
 
 {% if can('user.read') or can('role.read') %}

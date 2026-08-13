@@ -61,6 +61,38 @@ class _TrustAccountView:
         return sum((holding.held for holding in self.holdings), Decimal("0"))
 
 
+@dataclass(frozen=True)
+class _Holder:
+    """One owner's share of one property on the date being viewed."""
+
+    owner_entity_id: str
+    owner: object | None
+    percentage: Decimal
+    since: dt.date
+
+
+@dataclass(frozen=True)
+class _OwnershipRow:
+    """A property and everyone holding a share of it.
+
+    The property field is named ``record`` rather than ``property``: a field of
+    that name shadows the builtin decorator for the rest of the class body.
+    """
+
+    record: Property
+    holders: list[_Holder]
+    total: Decimal
+
+    @property
+    def is_fully_allocated(self) -> bool:
+        """Zero is fine - a managed property with no equity record on file.
+
+        Anything between is a share nobody holds, which never reaches a
+        statement.
+        """
+        return self.total in (Decimal("0"), Decimal("100.0000"))
+
+
 @admin_bp.get("/")
 @login_required
 def dashboard() -> str:
@@ -289,6 +321,109 @@ def deposits() -> str:
         leases=leases,
         as_of=as_of,
     )
+
+
+@admin_bp.get("/ownership")
+@login_required
+def ownership() -> str:
+    """Who owns what, as at a date, with the history behind it.
+
+    Ownership is the input to every owner statement, so the figure that matters
+    is the one for a *period* rather than for today. The date control is the
+    point of the page, not a convenience on it.
+    """
+    require(Perm.OWNER_READ)
+    org_id = require_org_scope()
+
+    from app.models.org import OwnerEntity
+    from app.services.portfolio.ownership import ownership_on, total_allocated
+
+    as_of_raw = (request.args.get("as_of") or "").strip()
+    try:
+        as_of = dt.date.fromisoformat(as_of_raw) if as_of_raw else utcnow().date()
+    except ValueError:
+        as_of = utcnow().date()
+
+    owners = {
+        owner.id: owner
+        for owner in db.session.execute(
+            select(OwnerEntity).where(OwnerEntity.org_id == org_id)
+        ).scalars()
+    }
+    records = list(
+        db.session.execute(
+            select(Property).where(Property.org_id == org_id).order_by(Property.name)
+        ).scalars()
+    )
+
+    rows = []
+    for record in records:
+        stakes = ownership_on(
+            current_session(), org_id=org_id, property_id=record.id, on_date=as_of
+        )
+        total = total_allocated(
+            current_session(), org_id=org_id, property_id=record.id, on_date=as_of
+        )
+        rows.append(
+            _OwnershipRow(
+                record=record,
+                holders=[
+                    _Holder(
+                        owner=owners.get(stake.owner_entity_id),
+                        owner_entity_id=stake.owner_entity_id,
+                        percentage=Decimal(stake.percentage),
+                        since=stake.effective_from,
+                    )
+                    for stake in stakes
+                ],
+                total=total,
+            )
+        )
+
+    return render_template("admin/ownership.html", rows=rows, as_of=as_of)
+
+
+@admin_bp.get("/messages")
+@login_required
+def messages() -> str:
+    """The office side of every conversation, internal ones included."""
+    require(Perm.MESSAGE_READ)
+    org_id = require_org_scope()
+
+    from app.models.resident import MessageThread
+
+    status = (request.args.get("status") or "").strip()
+    stmt = select(MessageThread).where(
+        MessageThread.org_id == org_id, MessageThread.deleted_at.is_(None)
+    )
+    if status in ("open", "pending", "resolved"):
+        stmt = stmt.where(MessageThread.status == status)
+
+    threads = list(
+        db.session.execute(
+            stmt.order_by(MessageThread.last_message_at.desc().nulls_last()).limit(200)
+        ).scalars()
+    )
+    return render_template("admin/messages.html", threads=threads, status=status)
+
+
+@admin_bp.get("/messages/<id:thread_id>")
+@login_required
+def message_thread(thread_id: str) -> str:
+    """One conversation, with the office's reply box."""
+    require(Perm.MESSAGE_READ)
+    org_id = require_org_scope()
+
+    from app.models.resident import MessageThread
+    from app.services.notifications.messaging import mark_read
+
+    thread = db.session.get(MessageThread, thread_id)
+    if thread is None or thread.org_id != org_id or thread.deleted_at is not None:
+        abort(404)
+
+    mark_read(current_session(), thread=thread, reader_is_staff=True)
+    db.session.commit()
+    return render_template("admin/message_thread.html", thread=thread)
 
 
 @admin_bp.get("/audit")

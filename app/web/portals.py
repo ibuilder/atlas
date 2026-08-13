@@ -33,9 +33,17 @@ from app.models.iam import UserType
 from app.models.leasing import Lease, LeaseStatus
 from app.models.maintenance import WORK_ORDER_TERMINAL, MaintenanceRequest, WorkOrder
 from app.models.org import OwnershipStake, Property
-from app.models.resident import Tenancy
+from app.models.resident import MessageDirection, Tenancy
 from app.security.permissions import Perm
 from app.security.policies import require
+from app.services.notifications.messaging import (
+    Participant,
+    mark_read,
+    open_thread,
+    post_message,
+    thread_for_participant,
+    visible_threads,
+)
 
 resident_bp = Blueprint("resident", __name__)
 owner_bp = Blueprint("owner", __name__)
@@ -551,3 +559,197 @@ def vendor_update_work_order(work_order_id: str) -> Response:
 
     flash(f"{work_order.work_order_number} is now {work_order.status.value}.", "success")
     return redirect(url_for("vendor.dashboard"))
+
+
+# ---------------------------------------------------------------------------
+# Messaging
+#
+# One implementation for three portals. Which threads a caller sees is decided
+# by `_participant`, from who they are - never from anything they send - and
+# `visible_threads` refuses internal threads outright rather than relying on a
+# template to filter them.
+# ---------------------------------------------------------------------------
+
+
+def _participant() -> Participant:
+    """Derive the caller's participation from their account, not their request."""
+    if current_user.user_type == UserType.RESIDENT:
+        return Participant(resident_id=current_user.resident_id)
+    if current_user.user_type == UserType.OWNER:
+        return Participant(owner_entity_id=current_user.owner_entity_id)
+    return Participant(vendor_id=current_user.vendor_id)
+
+
+def _portal_home() -> str:
+    return {
+        UserType.RESIDENT: "resident.dashboard",
+        UserType.OWNER: "owner.dashboard",
+        UserType.VENDOR: "vendor.dashboard",
+    }.get(current_user.user_type, "public.index")
+
+
+def _messages_index(expected: UserType) -> str:
+    _require_user_type(expected)
+    require(Perm.MESSAGE_READ)
+    org_id = require_org_scope()
+
+    threads = visible_threads(
+        current_session(), org_id=org_id, participant=_participant(), limit=50
+    )
+    return render_template("portals/messages.html", threads=threads, home_endpoint=_portal_home())
+
+
+def _message_thread(expected: UserType, thread_id: str) -> str:
+    _require_user_type(expected)
+    require(Perm.MESSAGE_READ)
+    org_id = require_org_scope()
+
+    thread = thread_for_participant(
+        current_session(), org_id=org_id, thread_id=thread_id, participant=_participant()
+    )
+    mark_read(current_session(), thread=thread, reader_is_staff=False)
+    db.session.commit()
+
+    return render_template(
+        "portals/message_thread.html", thread=thread, home_endpoint=_portal_home()
+    )
+
+
+def _reply(expected: UserType, thread_id: str, endpoint: str) -> Response:
+    _require_user_type(expected)
+    require(Perm.MESSAGE_SEND)
+    org_id = require_org_scope()
+
+    thread = thread_for_participant(
+        current_session(), org_id=org_id, thread_id=thread_id, participant=_participant()
+    )
+    try:
+        post_message(
+            current_session(),
+            thread=thread,
+            body=request.form.get("body") or "",
+            sender_label=current_user.full_name,
+            sender_user_id=current_user.id,
+            # From a portal it is always inbound: the office is the other side.
+            direction=MessageDirection.INBOUND,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for(endpoint, thread_id=thread_id))
+
+    flash("Message sent.", "success")
+    return redirect(url_for(endpoint, thread_id=thread_id))
+
+
+@resident_bp.get("/messages", endpoint="messages")
+@login_required
+def resident_messages() -> str:
+    """Every conversation on this resident's own tenancies."""
+    return _messages_index(UserType.RESIDENT)
+
+
+@resident_bp.get("/messages/<id:thread_id>", endpoint="message_thread")
+@login_required
+def resident_message_thread(thread_id: str) -> str:
+    return _message_thread(UserType.RESIDENT, thread_id)
+
+
+@resident_bp.post("/messages/<id:thread_id>/reply", endpoint="message_reply")
+@login_required
+def resident_message_reply(thread_id: str) -> Response:
+    return _reply(UserType.RESIDENT, thread_id, "resident.message_thread")
+
+
+@resident_bp.post("/messages", endpoint="message_start")
+@login_required
+def resident_start_thread() -> Response:
+    """Open a conversation against the resident's own active lease."""
+    _require_user_type(UserType.RESIDENT)
+    require(Perm.MESSAGE_SEND)
+    org_id = require_org_scope()
+
+    title = (request.form.get("title") or "").strip()
+    body = (request.form.get("body") or "").strip()
+    if not title or not body:
+        flash("A message needs a subject and something to say.", "error")
+        return redirect(url_for("resident.messages"))
+
+    lease_ids = _resident_lease_ids(org_id)
+    lease = (
+        db.session.execute(
+            select(Lease)
+            .where(Lease.id.in_(lease_ids), Lease.status == LeaseStatus.ACTIVE)
+            .limit(1)
+        ).scalar_one_or_none()
+        if lease_ids
+        else None
+    )
+    if lease is None:
+        flash("There is no active lease on your account to write about.", "error")
+        return redirect(url_for("resident.messages"))
+
+    try:
+        thread = open_thread(
+            current_session(),
+            org_id=org_id,
+            title=title,
+            subject_type="lease",
+            subject_id=lease.id,
+            property_id=lease.property_id,
+            unit_id=lease.unit_id,
+            resident_id=current_user.resident_id,
+            actor_id=current_user.id,
+        )
+        post_message(
+            current_session(),
+            thread=thread,
+            body=body,
+            sender_label=current_user.full_name,
+            sender_user_id=current_user.id,
+            direction=MessageDirection.INBOUND,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("resident.messages"))
+
+    return redirect(url_for("resident.message_thread", thread_id=thread.id))
+
+
+@owner_bp.get("/messages", endpoint="messages")
+@login_required
+def owner_messages() -> str:
+    return _messages_index(UserType.OWNER)
+
+
+@owner_bp.get("/messages/<id:thread_id>", endpoint="message_thread")
+@login_required
+def owner_message_thread(thread_id: str) -> str:
+    return _message_thread(UserType.OWNER, thread_id)
+
+
+@owner_bp.post("/messages/<id:thread_id>/reply", endpoint="message_reply")
+@login_required
+def owner_message_reply(thread_id: str) -> Response:
+    return _reply(UserType.OWNER, thread_id, "owner.message_thread")
+
+
+@vendor_bp.get("/messages", endpoint="messages")
+@login_required
+def vendor_messages() -> str:
+    return _messages_index(UserType.VENDOR)
+
+
+@vendor_bp.get("/messages/<id:thread_id>", endpoint="message_thread")
+@login_required
+def vendor_message_thread(thread_id: str) -> str:
+    return _message_thread(UserType.VENDOR, thread_id)
+
+
+@vendor_bp.post("/messages/<id:thread_id>/reply", endpoint="message_reply")
+@login_required
+def vendor_message_reply(thread_id: str) -> Response:
+    return _reply(UserType.VENDOR, thread_id, "vendor.message_thread")
