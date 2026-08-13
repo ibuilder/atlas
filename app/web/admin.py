@@ -13,10 +13,12 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal
 
-from flask import Blueprint, abort, render_template, request
-from flask_login import login_required
+from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask_login import current_user, login_required
 from sqlalchemy import func, select
+from werkzeug.wrappers import Response
 
+from app.errors import AtlasError
 from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.accounting import BankAccount, Invoice, InvoiceStatus
@@ -380,7 +382,12 @@ def ownership() -> str:
             )
         )
 
-    return render_template("admin/ownership.html", rows=rows, as_of=as_of)
+    return render_template(
+        "admin/ownership.html",
+        rows=rows,
+        as_of=as_of,
+        owners=sorted(owners.values(), key=lambda owner: owner.name),
+    )
 
 
 @admin_bp.get("/turns")
@@ -671,3 +678,186 @@ def _count(stmt) -> int:  # noqa: ANN001
 
 def _sum(stmt) -> Decimal:  # noqa: ANN001
     return Decimal(str(db.session.execute(stmt).scalar_one() or 0))
+
+
+# ---------------------------------------------------------------------------
+# Write actions
+#
+# Each delegates to the service and surfaces its refusal verbatim. The rules
+# live there - a turn that cannot be ready, a transfer that would not total
+# 100% - and the console does not restate them, because two copies of a rule is
+# one copy that goes stale.
+# ---------------------------------------------------------------------------
+
+
+def _turn_or_404(turn_id: str, org_id: str):  # noqa: ANN202
+    from app.models.leasing import Turn
+
+    turn = db.session.get(Turn, turn_id)
+    if turn is None or turn.org_id != org_id or turn.deleted_at is not None:
+        abort(404)
+    return turn
+
+
+@admin_bp.post("/turns/<id:turn_id>/steps/<id:step_id>")
+@login_required
+def turn_step_action(turn_id: str, step_id: str) -> Response:
+    """Complete a step, skip it with a reason, or attach the job doing it."""
+    require(Perm.UNIT_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.turns import complete_step, link_work_order, skip_step
+
+    turn = _turn_or_404(turn_id, org_id)
+    step = next((candidate for candidate in turn.steps if candidate.id == step_id), None)
+    if step is None:
+        abort(404)
+
+    action = (request.form.get("action") or "").strip().lower()
+    back = redirect(url_for("admin.turn_detail", turn_id=turn_id))
+
+    try:
+        if action == "complete":
+            complete_step(current_session(), step=step, actor_id=current_user.id)
+        elif action == "skip":
+            # The reason is mandatory in the service. Passing the raw field lets
+            # it say so, rather than the console inventing its own message.
+            skip_step(
+                current_session(),
+                step=step,
+                reason=request.form.get("reason") or "",
+                actor_id=current_user.id,
+            )
+        elif action == "link":
+            work_order_id = (request.form.get("work_order_id") or "").strip()
+            if not work_order_id:
+                flash("Linking a step needs a work order.", "error")
+                return back
+            link_work_order(current_session(), step=step, work_order_id=work_order_id)
+        else:
+            flash("That is not something you can do to a step.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(f"{step.name} updated.", "success")
+    return back
+
+
+@admin_bp.post("/turns/<id:turn_id>")
+@login_required
+def turn_action(turn_id: str) -> Response:
+    """Mark a turn ready, or cancel it."""
+    require(Perm.UNIT_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.turns import cancel_turn, mark_ready
+
+    turn = _turn_or_404(turn_id, org_id)
+    action = (request.form.get("action") or "").strip().lower()
+    back = redirect(url_for("admin.turn_detail", turn_id=turn_id))
+
+    try:
+        if action == "ready":
+            # Deliberately no date field: a unit is ready when somebody says it
+            # is, and letting the form back-date readiness is how days-vacant
+            # gets flattered.
+            mark_ready(current_session(), turn=turn, actor_id=current_user.id)
+            message = f"Unit ready after {turn.days_vacant} days."
+        elif action == "cancel":
+            cancel_turn(
+                current_session(),
+                turn=turn,
+                reason=request.form.get("reason") or "",
+                actor_id=current_user.id,
+            )
+            message = "Turn cancelled."
+        else:
+            flash("That is not something you can do to a turn.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back
+
+
+@admin_bp.post("/ownership/<id:property_id>")
+@login_required
+def ownership_action(property_id: str) -> Response:
+    """Record a stake, or transfer one."""
+    require(Perm.OWNER_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.portfolio.ownership import record_initial_stake, transfer_ownership
+
+    action = (request.form.get("action") or "").strip().lower()
+    back = redirect(url_for("admin.ownership"))
+
+    raw_date = (request.form.get("effective_from") or "").strip()
+    try:
+        effective_from = dt.date.fromisoformat(raw_date) if raw_date else utcnow().date()
+    except ValueError:
+        flash("That is not a date.", "error")
+        return back
+
+    raw_percentage = (request.form.get("percentage") or "").strip()
+    percentage: Decimal | None = None
+    if raw_percentage:
+        try:
+            percentage = Decimal(raw_percentage)
+            # NaN survives construction and then raises on every comparison
+            # downstream rather than failing one, so it is rejected here.
+            if not percentage.is_finite():
+                raise ArithmeticError("not a finite percentage")
+        except (ArithmeticError, ValueError):
+            flash("That is not a percentage.", "error")
+            return back
+
+    try:
+        if action == "record":
+            if percentage is None:
+                flash("A stake needs a percentage.", "error")
+                return back
+            record_initial_stake(
+                current_session(),
+                org_id=org_id,
+                property_id=property_id,
+                owner_entity_id=(request.form.get("owner_entity_id") or "").strip(),
+                percentage=percentage,
+                effective_from=effective_from,
+                is_primary_contact=bool(request.form.get("is_primary_contact")),
+                actor_id=current_user.id,
+            )
+            message = "Stake recorded."
+        elif action == "transfer":
+            transfer = transfer_ownership(
+                current_session(),
+                org_id=org_id,
+                property_id=property_id,
+                from_owner_entity_id=(request.form.get("from_owner_entity_id") or "").strip(),
+                to_owner_entity_id=(request.form.get("to_owner_entity_id") or "").strip(),
+                effective_from=effective_from,
+                # Omitted moves the seller's whole holding.
+                percentage=percentage,
+                reason=request.form.get("reason") or None,
+                actor_id=current_user.id,
+            )
+            message = f"{transfer.percentage}% transferred with effect from {effective_from}."
+        else:
+            flash("That is not something you can do to ownership.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back

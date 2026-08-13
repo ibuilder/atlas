@@ -62,6 +62,57 @@
                 {% endif %}
               </td>
             </tr>
+
+            {% if can('owner.manage') %}
+            <tr>
+              <td colspan="4">
+                {# Both forms POST to the same handler. The service decides
+                   whether the arithmetic works; this page does not restate the
+                   rules, because two copies of a rule is one that goes stale. #}
+                <form method="post"
+                      action="{{ url_for('admin.ownership_action', property_id=row.record.id) }}"
+                      class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <input type="date" name="effective_from" value="{{ as_of.isoformat() }}"
+                         aria-label="Effective from">
+                  <input type="number" name="percentage" step="0.0001" min="0" max="100"
+                         placeholder="%" aria-label="Percentage">
+
+                  <select name="owner_entity_id" aria-label="Owner">
+                    <option value="">Record a stake for…</option>
+                    {% for owner in owners %}
+                      <option value="{{ owner.id }}">{{ owner.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" name="action" value="record" class="btn btn--quiet">
+                    Record
+                  </button>
+
+                  <select name="from_owner_entity_id" aria-label="Transfer from">
+                    <option value="">From…</option>
+                    {% for holder in row.holders %}
+                      <option value="{{ holder.owner_entity_id }}">
+                        {{ holder.owner.name if holder.owner else holder.owner_entity_id }}
+                        ({{ holder.percentage }}%)
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <select name="to_owner_entity_id" aria-label="Transfer to">
+                    <option value="">To…</option>
+                    {% for owner in owners %}
+                      <option value="{{ owner.id }}">{{ owner.name }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" name="action" value="transfer" class="btn btn--quiet">
+                    Transfer
+                  </button>
+                </form>
+                <span class="tiny muted">
+                  A transfer with no percentage moves the seller's whole holding.
+                </span>
+              </td>
+            </tr>
+            {% endif %}
           {% endfor %}
         </tbody>
       </table>

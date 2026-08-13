@@ -43,7 +43,7 @@
   <div class="table-wrap">
     <table class="data">
       <thead>
-        <tr><th>#</th><th>Step</th><th>Trade</th><th>Required</th><th>Status</th><th>Note</th></tr>
+        <tr><th>#</th><th>Step</th><th>Trade</th><th>Required</th><th>Status</th><th>Note</th><th></th></tr>
       </thead>
       <tbody>
         {% for step in turn.steps %}
@@ -60,12 +60,60 @@
               {% endif %}
             </td>
             <td class="tiny muted">{{ step.skip_reason or '' }}</td>
+            <td class="tiny">
+              {% if can('unit.manage') and step.completed_at is none
+                    and turn.status.value in ('scheduled', 'in_progress') %}
+                <form method="post"
+                      action="{{ url_for('admin.turn_step_action', turn_id=turn.id, step_id=step.id) }}"
+                      class="inline-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" name="action" value="complete" class="btn btn--quiet">
+                    Done
+                  </button>
+                  {# The reason is required by the service, not merely by this
+                     input: an unexplained omission is the one somebody has to
+                     account for later. #}
+                  <input type="text" name="reason" maxlength="255" placeholder="Reason to skip">
+                  <button type="submit" name="action" value="skip" class="btn btn--quiet">
+                    Skip
+                  </button>
+                </form>
+              {% endif %}
+            </td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+{% if can('unit.manage') and turn.status.value in ('scheduled', 'in_progress') %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Finish or abandon</h2>
+    <span class="panel__hint">
+      {% if outstanding %}
+        Ready is refused while a required step is outstanding
+      {% else %}
+        Every required step is settled
+      {% endif %}
+    </span>
+  </div>
+
+  <form method="post" action="{{ url_for('admin.turn_action', turn_id=turn.id) }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" name="action" value="ready" class="btn">
+      Mark rent-ready
+    </button>
+    <label for="cancel_reason">Or cancel, with a reason</label>
+    <input type="text" id="cancel_reason" name="reason" maxlength="255"
+           placeholder="Resident withdrew notice">
+    <button type="submit" name="action" value="cancel" class="btn btn--quiet">
+      Cancel turn
+    </button>
+  </form>
+</div>
+{% endif %}
 
 {% if turn.notes %}
 <div class="panel">
