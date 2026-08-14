@@ -131,6 +131,30 @@ message buries everything else in it.
 The chain is `Lead → Application → Lease → Tenancy → MoveOut`, with `Turn`
 running alongside the gap between one tenancy and the next.
 
+**Consent to screening is evidence, and evidence has provenance.** The address
+it was given from is read from the connection at the moment it is recorded, and
+never from the request body. An address the submitter supplies is a claim about
+consent, not a record of it, and this is the only moment the real one exists.
+Screening is refused outright without a consent record, and the refusal is
+audited as CRITICAL rather than returned quietly.
+
+**The criteria are snapshotted at the decision.** Not referenced — copied. "Why
+was this denied" has to answer against the thresholds in force at the time,
+which is a different question from what they became afterwards, and only one of
+those two answers is defensible in a fair-housing review.
+
+**Every decision carries a reason, approvals included.** On a denial that text
+*is* the adverse-action notice. Requiring one only on denials is what makes them
+look arbitrary next to the approvals, and a declining screening with no
+structured factors is flagged for the same reason: no lawful notice can be
+written from the word "declined".
+
+**A decision is refused once an application is withdrawn, lapsed, or converted.**
+The statuses a decision may be taken *from* are named as an allow-list rather
+than inferred from "not already decided" — converted is the dangerous one, since
+ruling again on a converted application rewrites the recorded basis of a lease
+somebody is already living under.
+
 **A lease and a tenancy are different things.** A lease is the contract; a
 tenancy is one person's relationship to it. Two residents on one lease are two
 tenancies, and financial responsibility is per tenancy.

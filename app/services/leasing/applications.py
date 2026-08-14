@@ -603,6 +603,19 @@ def deny_application(
     return application
 
 
+#: The statuses a decision may still be taken from. Named as an allow-list
+#: rather than as a set of forbidden ones: withdrawn, expired and converted all
+#: used to fall through a "not already decided" test, and converted is the one
+#: that matters - it would rule on an application already backing a tenancy.
+DECIDABLE_FROM = frozenset(
+    {
+        ApplicationStatus.SUBMITTED,
+        ApplicationStatus.SCREENING,
+        ApplicationStatus.PENDING_REVIEW,
+    }
+)
+
+
 def _assert_decidable(application: Application, decided_by_id: str) -> None:
     if not decided_by_id:
         raise ValidationFailed("A decision must be attributed to a person.")
@@ -613,6 +626,10 @@ def _assert_decidable(application: Application, decided_by_id: str) -> None:
         )
     if application.status == ApplicationStatus.DRAFT:
         raise BusinessRuleViolation("A draft application has not been submitted yet.")
+    if application.status not in DECIDABLE_FROM:
+        raise BusinessRuleViolation(
+            f"This application is {application.status} and is no longer open to a decision."
+        )
 
 
 def withdraw_application(

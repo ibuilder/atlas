@@ -113,6 +113,10 @@ def seed_demo(slug: str, force: bool) -> None:
         f"  E-signature  : {operations['envelopes']} envelopes - one executed, "
         "one waiting in the resident portal"
     )
+    click.echo(
+        f"  Applications : {operations['applications']} "
+        "(one awaiting a decision, one conditional, one denied)"
+    )
     _print_credentials(slug)
 
 

@@ -82,8 +82,8 @@ probes.
 revocation · login throttling and lockout · single-use password reset · hashed API tokens · OIDC and SAML 2.0
 single sign-on with SCIM directory provisioning.
 
-**Leasing** — leads, guest cards, lease packets, and charge schedules driving recurring billing. Applications,
-screening orchestration, and renewals are modelled but have no workflow yet; see
+**Leasing** — leads, guest cards, applications and screening from enquiry to signed lease, lease packets, and
+charge schedules driving recurring billing. Renewals and move-outs are modelled but have no workflow yet; see
 [docs/FEATURES.md](docs/FEATURES.md), which states the status of every claim on this page.
 
 **Accounting** — segmented chart of accounts, double-entry journal, trust accounts, AR invoices, AP bills, payments

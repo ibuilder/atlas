@@ -12,6 +12,18 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **The leasing funnel is reachable** (ROADMAP 6.1). An application can be
+  taken, given applicants, consented, submitted, screened, decided, and turned
+  into a lease — from the operations console at `/admin/applications` and from
+  `/api/v1/applications`. Consent is recorded from `request.remote_addr` on both
+  surfaces and never from the submitted body: an address the caller can dictate
+  is not evidence that anybody agreed to be screened, and this is the only
+  moment the real one exists. Every decision requires a reason, approvals
+  included — on a denial that text *is* the adverse-action notice, and demanding
+  one only there is what makes the denials look arbitrary beside the approvals.
+  A conditional approval is refused if it does not say what the conditions are,
+  rather than quietly becoming an unconditional one.
+
 - **Signing works.** The envelope lifecycle shipped with no route anywhere: the
   only caller was the demo seed. All three portals now list what is awaiting the
   signed-in person, show the consent wording immediately above the field, and
@@ -148,6 +160,20 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Fixed
 
+- **A decided-and-done application could be decided again.** `_assert_decidable`
+  tested only "not already approved or denied" and "not still a draft", which
+  let `withdrawn`, `expired`, and `converted` straight through. Converted is the
+  one that matters: approving or denying an application already backing a live
+  tenancy would rewrite the recorded basis of a lease somebody is living under,
+  and the audit event would say a decision was taken today on a tenancy that
+  started months ago. The check is now an allow-list of the statuses a decision
+  may be taken *from*.
+- **`ApplicantOut` reported consent as never given.** The schema named the
+  fields `consent_given_at` and `consent_ip`; the model calls them
+  `screening_consent_at` and `screening_consent_ip`. Pydantic filled the missing
+  attributes with their defaults, so every API response said no consent existed
+  — including for applicants who had given it, and including to a caller
+  deciding whether it was lawful to order the screening.
 - **An owner could not see a thread addressed to them.** `visible_threads`
   compared one flat list of ids against `subject_id` regardless of
   `subject_type`; for an owner that list is *property* ids, so a thread anchored

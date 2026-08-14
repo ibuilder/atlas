@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import datetime as dt
 
-from flask import Response
+from flask import Response, request
+from flask_login import current_user
 from sqlalchemy import select
 
 from app.api.helpers import (
@@ -24,26 +25,46 @@ from app.errors import BusinessRuleViolation, NotFound
 from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.audit import AuditAction
-from app.models.leasing import Lead, Lease, LeaseStatus
+from app.models.leasing import (
+    Applicant,
+    Application,
+    Lead,
+    Lease,
+    LeaseStatus,
+    ScreeningResult,
+)
 from app.models.org import Unit, UnitStatus
 from app.models.resident import Resident, Tenancy, TenancyRole
 from app.models.sequences import SequenceKey
 from app.schemas.operations import (
+    ApplicantCreate,
+    ApplicantOut,
+    ApplicationCreate,
+    ApplicationDecision,
+    ApplicationListQuery,
+    ApplicationOut,
+    ApplicationWithdraw,
+    AssessmentOut,
     LeadCreate,
     LeadListQuery,
     LeadOut,
     LeaseCreate,
+    LeaseFromApplication,
     LeaseListQuery,
     LeaseOut,
     ResidentCreate,
     ResidentListQuery,
     ResidentOut,
+    ScreeningOut,
+    ScreeningRecord,
+    ScreeningRequest,
 )
 from app.security.permissions import Perm
 from app.security.policies import filter_permitted, require
 from app.services.audit.recorder import record_audit_event
 from app.services.common.numbering import next_number
 from app.services.common.unit_of_work import transaction
+from app.services.leasing import applications
 
 __all__ = []
 
@@ -218,9 +239,7 @@ def create_lease() -> Response:
     )
 
 
-def _assert_no_overlapping_lease(
-    session, unit_id: str, start: dt.date, end: dt.date
-) -> None:  # noqa: ANN001
+def _assert_no_overlapping_lease(session, unit_id: str, start: dt.date, end: dt.date) -> None:  # noqa: ANN001
     """Refuse to double-let a unit.
 
     Overlap is inclusive on both ends: a lease ending on the 31st and another
@@ -294,3 +313,283 @@ def activate_lease(lease_id: str) -> Response:
         )
 
     return add_etag(respond(LeaseOut.model_validate(lease, from_attributes=True)), lease)
+
+
+# ------------------------------------------------------------- applications
+#
+# The funnel from an enquiry to a tenancy. Two things here are not ordinary
+# CRUD and are worth reading before changing:
+#
+# Consent is recorded from the *request*, never from the body. A screening
+# ordered without recorded consent is a statutory violation, and the evidence
+# that it was given cannot be reconstructed afterwards - so the address it came
+# from is taken from the connection.
+#
+# The decision endpoint demands a reason on every outcome, including approval.
+# Those reasons are the adverse-action notice, and a denial without one is
+# indefensible in a fair-housing review.
+
+
+def _application_or_404(application_id: str, org_id: str) -> Application:
+    record = db.session.get(Application, application_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That application was not found.")
+    return record
+
+
+@api_v1_bp.get("/applications", endpoint="applications_list")
+def list_applications() -> Response:
+    require(Perm.APPLICATION_READ)
+    query = parse_query(ApplicationListQuery)
+    org_id = require_org_scope()
+
+    stmt = select(Application).where(Application.org_id == org_id)
+    if query.status:
+        stmt = stmt.where(Application.status == query.status)
+    if query.property_id:
+        stmt = stmt.where(Application.property_id == query.property_id)
+    if query.unit_id:
+        stmt = stmt.where(Application.unit_id == query.unit_id)
+
+    page = paginate(current_session(), stmt, Application, limit=query.limit, cursor=query.cursor)
+    return respond_collection(page, ApplicationOut)
+
+
+@api_v1_bp.get("/applications/<id:application_id>", endpoint="applications_get")
+def get_application(application_id: str) -> Response:
+    """One application with its applicants, screenings, and the assessment."""
+    require(Perm.APPLICATION_READ)
+    org_id = require_org_scope()
+
+    record = _application_or_404(application_id, org_id)
+    assessment = applications.assess_application(current_session(), application=record)
+
+    return respond(
+        {
+            **ApplicationOut.model_validate(record, from_attributes=True).model_dump(mode="json"),
+            "applicants": [
+                ApplicantOut.model_validate(a, from_attributes=True).model_dump(mode="json")
+                for a in record.applicants
+            ],
+            "screenings": [
+                ScreeningOut.model_validate(s, from_attributes=True).model_dump(mode="json")
+                for s in record.screenings
+            ],
+            "assessment": AssessmentOut.model_validate(assessment, from_attributes=True).model_dump(
+                mode="json"
+            ),
+        }
+    )
+
+
+@api_v1_bp.post("/applications", endpoint="applications_create")
+def create_application() -> Response:
+    require(Perm.APPLICATION_MANAGE)
+    payload = parse_body(ApplicationCreate)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = applications.create_application(
+            session,
+            org_id=org_id,
+            property_id=payload.property_id,
+            unit_id=payload.unit_id,
+            lead_id=payload.lead_id,
+            desired_move_in=payload.desired_move_in,
+            lease_term_months=payload.lease_term_months,
+            quoted_rent=payload.quoted_rent,
+            application_fee=payload.application_fee,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        ApplicationOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/applications/{record.id}",
+    )
+
+
+@api_v1_bp.post("/applications/<id:application_id>/applicants", endpoint="applicants_create")
+def add_applicant(application_id: str) -> Response:
+    require(Perm.APPLICATION_MANAGE)
+    payload = parse_body(ApplicantCreate)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        application = _application_or_404(application_id, org_id)
+        record = applications.add_applicant(
+            session,
+            application=application,
+            first_name=payload.first_name,
+            last_name=payload.last_name,
+            role=payload.role,
+            email=payload.email,
+            phone=payload.phone,
+            monthly_income=payload.monthly_income,
+            employer_name=payload.employer_name,
+            resident_id=payload.resident_id,
+        )
+
+    return respond_created(
+        ApplicantOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/applications/{application_id}",
+    )
+
+
+@api_v1_bp.post("/applicants/<id:applicant_id>/consent", endpoint="applicants_consent")
+def record_consent(applicant_id: str) -> Response:
+    """Record that this applicant consented to being screened.
+
+    The address is taken from the connection rather than the body. Consent
+    evidence that the caller can dictate is not evidence, and this is the only
+    moment the real one exists.
+    """
+    require(Perm.APPLICATION_MANAGE)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        applicant = session.get(Applicant, applicant_id)
+        if applicant is None or applicant.org_id != org_id:
+            raise NotFound("That applicant was not found.")
+        record = applications.record_consent(
+            session, applicant=applicant, ip_address=request.remote_addr or "unknown"
+        )
+
+    return respond(ApplicantOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/applications/<id:application_id>/submit", endpoint="applications_submit")
+def submit_application(application_id: str) -> Response:
+    require(Perm.APPLICATION_MANAGE)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        application = _application_or_404(application_id, org_id)
+        record = applications.submit_application(
+            session, application=application, actor_id=current_user.id
+        )
+
+    return respond(ApplicationOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/applications/<id:application_id>/screenings", endpoint="screenings_request")
+def request_screening(application_id: str) -> Response:
+    """Order a screening. Refused without recorded consent."""
+    require(Perm.SCREENING_ORDER)
+    payload = parse_body(ScreeningRequest)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        application = _application_or_404(application_id, org_id)
+        applicant = session.get(Applicant, payload.applicant_id)
+        if applicant is None or applicant.application_id != application.id:
+            raise NotFound("That applicant was not found on this application.")
+        record = applications.request_screening(
+            session, application=application, applicant=applicant, provider=payload.provider
+        )
+
+    return respond_created(
+        ScreeningOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/applications/{application_id}",
+    )
+
+
+@api_v1_bp.post("/screenings/<id:screening_id>", endpoint="screenings_record")
+def record_screening(screening_id: str) -> Response:
+    """Record what the provider came back with."""
+    require(Perm.SCREENING_ORDER)
+    payload = parse_body(ScreeningRecord)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        screening = session.get(ScreeningResult, screening_id)
+        if screening is None or screening.org_id != org_id:
+            raise NotFound("That screening was not found.")
+        record = applications.record_screening(
+            session,
+            screening=screening,
+            recommendation=payload.recommendation,
+            credit_score=payload.credit_score,
+            has_eviction_history=payload.has_eviction_history,
+            has_criminal_record=payload.has_criminal_record,
+            verified_monthly_income=payload.verified_monthly_income,
+            provider_reference=payload.provider_reference,
+        )
+
+    return respond(ScreeningOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/applications/<id:application_id>/decision", endpoint="applications_decide")
+def decide_application(application_id: str) -> Response:
+    """Approve, approve with conditions, or deny.
+
+    A reason is mandatory on every outcome. Those reasons *are* the
+    adverse-action notice on a denial, and requiring one on approvals too is
+    what stops the denials looking arbitrary by comparison.
+    """
+    require(Perm.APPLICATION_DECIDE)
+    payload = parse_body(ApplicationDecision)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        application = _application_or_404(application_id, org_id)
+        if payload.decision == "deny":
+            record = applications.deny_application(
+                session,
+                application=application,
+                decided_by_id=current_user.id,
+                reasons=[payload.reason],
+            )
+        else:
+            record = applications.approve_application(
+                session,
+                application=application,
+                decided_by_id=current_user.id,
+                conditions=payload.conditions if payload.decision.endswith("conditions") else None,
+                reason=payload.reason,
+            )
+
+    return respond(ApplicationOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/applications/<id:application_id>/withdraw", endpoint="applications_withdraw")
+def withdraw_application(application_id: str) -> Response:
+    require(Perm.APPLICATION_MANAGE)
+    payload = parse_body(ApplicationWithdraw)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        application = _application_or_404(application_id, org_id)
+        record = applications.withdraw_application(
+            session, application=application, reason=payload.reason
+        )
+
+    return respond(ApplicationOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/applications/<id:application_id>/lease", endpoint="applications_convert")
+def convert_application(application_id: str) -> Response:
+    """Turn an approved application into a lease.
+
+    Refuses anything not approved, and refuses an approval that has lapsed: one
+    granted four months ago was granted against circumstances that have moved.
+    """
+    require(Perm.LEASE_CREATE)
+    payload = parse_body(LeaseFromApplication)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        application = _application_or_404(application_id, org_id)
+        lease = applications.convert_to_lease(
+            session,
+            application=application,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            rent_amount=payload.rent_amount,
+            security_deposit=payload.security_deposit,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        LeaseOut.model_validate(lease, from_attributes=True),
+        location=f"/api/v1/leases/{lease.id}",
+    )

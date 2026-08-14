@@ -1,0 +1,269 @@
+{# One application, and the decision it is waiting for.
+
+   The assessment is shown as what it is: a recommendation measured against
+   thresholds. Its reasons and what it still lacks are kept apart, because an
+   application short of a pay stub is a different conversation from one that
+   fails on its merits — and only one of those is worth a phone call.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ application.application_number }} · {{ app_name }}{% endblock %}
+{% block heading %}Application {{ application.application_number }}{% endblock %}
+{% block nav %}{{ admin_nav('applications') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if application.status.value == 'denied' %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span> Denied</span>
+{% else %}
+  <span class="integrity"><span class="integrity__dot"></span>
+    {{ application.status | humanize }}</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ property.name if property else application.property_id }}</h2>
+    <span class="panel__hint">
+      {%- if application.submitted_at %}
+        Received {{ application.submitted_at.date().isoformat() }}
+      {%- else %}Not yet submitted{% endif %}
+      {%- if application.desired_move_in %}
+        · wants {{ application.desired_move_in.isoformat() }}
+      {%- endif %}
+      {%- if application.quoted_rent is not none %}
+        · quoted {{ application.quoted_rent | money }}
+      {%- endif %}
+    </span>
+  </div>
+
+  {% if application.expires_at %}
+    <p class="tiny muted">
+      This decision lapses {{ application.expires_at.date().isoformat() }}. An approval
+      granted against circumstances that have since moved is not one to convert.
+    </p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Assessment</h2>
+    <span class="panel__hint">
+      Recommends {{ assessment.recommendation | humanize | lower }}
+      {%- if assessment.income_ratio is not none %}
+        · income {{ assessment.income_ratio }}× rent
+      {%- endif %}
+      {%- if assessment.lowest_credit_score %}
+        · lowest score {{ assessment.lowest_credit_score }}
+      {%- endif %}
+    </span>
+  </div>
+
+  <p class="tiny muted">
+    This is what the thresholds say. It is not the decision; a person makes that
+    below, and their reason is what the applicant is owed.
+  </p>
+
+  {% if assessment.reasons %}
+    <p class="tiny"><strong>Counting against it</strong></p>
+    <ul>
+      {% for reason in assessment.reasons %}<li class="tiny">{{ reason }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if assessment.missing %}
+    <p class="tiny"><strong>Still unknown</strong></p>
+    <ul>
+      {% for item in assessment.missing %}<li class="tiny">{{ item }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if not assessment.reasons and not assessment.missing %}
+    <p class="empty">Nothing counts against this application and nothing is outstanding.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Applicants</h2>
+    <span class="panel__hint">{{ application.applicants | length }}</span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>Name</th><th>Role</th><th>Contact</th>
+            <th class="num">Stated income</th><th>Consent</th></tr>
+      </thead>
+      <tbody>
+        {% for applicant in application.applicants %}
+          <tr>
+            <td>{{ applicant.first_name }} {{ applicant.last_name }}</td>
+            <td class="tiny muted">{{ applicant.role | humanize }}</td>
+            <td class="tiny muted">{{ applicant.email or applicant.phone or '—' }}</td>
+            <td class="num">
+              {{ applicant.monthly_income | money if applicant.monthly_income is not none else '—' }}
+            </td>
+            <td class="tiny">
+              {% if applicant.screening_consent_at %}
+                {# The address is kept because it is the only evidence that
+                   exists after the fact that consent was actually given. #}
+                {{ applicant.screening_consent_at.date().isoformat() }}
+                <span class="muted">from {{ applicant.screening_consent_ip or 'unknown' }}</span>
+              {% elif can('application.manage') %}
+                {# No box to type an address into: it is read from the
+                   connection, because one the operator can type is not
+                   evidence of anything. #}
+                <form method="post" class="inline-form"
+                      action="{{ url_for('admin.applicant_consent', applicant_id=applicant.id) }}">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button type="submit" class="btn btn--quiet">Record consent</button>
+                </form>
+              {% else %}
+                <span class="pill pill--critical">Not given</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">Nobody has been added yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if can('application.manage') and not application.is_decided %}
+    <form method="post"
+          action="{{ url_for('admin.application_add_applicant', application_id=application.id) }}"
+          class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="first_name">First name</label>
+      <input type="text" id="first_name" name="first_name" maxlength="100" required>
+      <label for="last_name">Last name</label>
+      <input type="text" id="last_name" name="last_name" maxlength="100" required>
+      <label for="role">Role</label>
+      <select id="role" name="role">
+        <option value="primary">Primary</option>
+        <option value="co_applicant">Co-applicant</option>
+        <option value="guarantor">Guarantor</option>
+        <option value="occupant">Occupant</option>
+      </select>
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" maxlength="255">
+      <label for="phone">Phone</label>
+      <input type="text" id="phone" name="phone" maxlength="40">
+      <label for="monthly_income">Stated monthly income</label>
+      <input type="text" id="monthly_income" name="monthly_income" inputmode="decimal">
+      <label for="employer_name">Employer</label>
+      <input type="text" id="employer_name" name="employer_name" maxlength="255">
+      <button type="submit" class="btn btn--quiet">Add applicant</button>
+    </form>
+  {% endif %}
+</div>
+
+{% if can('application.manage') and application.status.value == 'draft' %}
+  <div class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Submit</h2>
+      <span class="panel__hint">A draft is not in the pipeline and nobody is waiting on it</span>
+    </div>
+    <form method="post"
+          action="{{ url_for('admin.application_submit', application_id=application.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn">Submit application</button>
+    </form>
+  </div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Screenings</h2>
+    <span class="panel__hint">{{ application.screenings | length }}</span>
+  </div>
+
+  {% if application.screenings %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Provider</th><th>Status</th><th>Recommendation</th>
+              <th class="num">Score</th><th class="num">Verified income</th><th>Expires</th></tr>
+        </thead>
+        <tbody>
+          {% for screening in application.screenings %}
+            <tr>
+              <td class="tiny">{{ screening.provider }}</td>
+              <td class="tiny">{{ screening.status | humanize }}</td>
+              <td class="tiny">
+                {{ screening.recommendation | humanize if screening.recommendation else '—' }}
+              </td>
+              <td class="num">{{ screening.credit_score or '—' }}</td>
+              <td class="num">
+                {{ screening.verified_monthly_income | money
+                   if screening.verified_monthly_income is not none else '—' }}
+              </td>
+              <td class="tiny muted">
+                {{ screening.expires_on.isoformat() if screening.expires_on else '—' }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No screening has been ordered.</p>
+  {% endif %}
+</div>
+
+{% if application.is_decided %}
+  <div class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Decision</h2>
+      <span class="panel__hint">
+        {{ application.status | humanize }}
+        {%- if application.decided_at %} on {{ application.decided_at.date().isoformat() }}{% endif %}
+      </span>
+    </div>
+    <p>{{ application.decision_reason or 'No reason was recorded.' }}</p>
+    {% if application.decision_conditions %}
+      <p class="tiny"><strong>Conditions</strong></p>
+      <ul>
+        {% for condition in application.decision_conditions.get('conditions', []) %}
+          <li class="tiny">{{ condition }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+{% elif can('application.decide') %}
+  <div class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Decide</h2>
+      <span class="panel__hint">A reason is required on every outcome</span>
+    </div>
+
+    <form method="post"
+          action="{{ url_for('admin.application_decision', application_id=application.id) }}"
+          class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="reason">Reason</label>
+      {# Not a courtesy field. On a denial this text is the adverse-action
+         notice; requiring it on approvals too is what keeps the denials
+         beside it from looking arbitrary. #}
+      <textarea id="reason" name="reason" rows="3" maxlength="2000" required
+                placeholder="Verified income is 3.1× rent and both references confirmed."></textarea>
+
+      <label for="conditions">Conditions, one per line</label>
+      <textarea id="conditions" name="conditions" rows="2"
+                placeholder="Co-signer required&#10;Two months' deposit"></textarea>
+
+      <button type="submit" name="action" value="approve" class="btn">Approve</button>
+      <button type="submit" name="action" value="approve_with_conditions" class="btn btn--quiet">
+        Approve with conditions
+      </button>
+      <button type="submit" name="action" value="deny" class="btn btn--quiet">Deny</button>
+    </form>
+  </div>
+{% endif %}
+
+<p class="tiny"><a href="{{ url_for('admin.applications') }}">Back to applications</a></p>
+{% endblock %}

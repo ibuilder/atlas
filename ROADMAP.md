@@ -190,7 +190,7 @@ the reachability list, and its FEATURES row honestly reads **Complete**.
 
 | # | Item | Size |
 |---|---|---|
-| 6.1 | Leasing funnel: application, screening, decision, conversion | L |
+| ~~6.1~~ | ~~Leasing funnel: application, screening, decision, conversion~~ | **Shipped** |
 | 6.2 | Move-outs, renewals, and deposit disposition | L |
 | 6.3 | Accounts payable: bills, approval, disbursement | M |
 | 6.4 | Bank reconciliation workspace | M |
@@ -200,12 +200,22 @@ the reachability list, and its FEATURES row honestly reads **Complete**.
 | 6.8 | Document extraction review queue | S |
 | 6.9 | Spaces and asset lifecycle management | M |
 
-**6.1** first because the funnel currently stops at leads: there is no path from
-an enquiry to a tenancy, which makes the several services behind it — consent
-before screening, criteria snapshotted at the decision, individual assessment
-for criminal history — protections on a road nobody can drive. Needs the
-applicant-facing intake as well as the staff decision screen; a decision surface
-alone still leaves applications with no way in.
+**6.1 — shipped.** The funnel used to stop at leads, which made the several
+services behind it — consent before screening, criteria snapshotted at the
+decision, individual assessment for criminal history — protections on a road
+nobody could drive. It now runs from intake to tenancy through the console and
+through `/api/v1/applications`. Two things came out of building it that the
+service had not been asked before: consent is read from the connection rather
+than from the request body, because an address the submitter can dictate is not
+evidence anybody agreed; and a decision is now refused once an application is
+withdrawn, lapsed, or already converted, which the old "not already decided"
+test let through — approving over a live tenancy included.
+
+Still open, and deliberately: there is no *public* self-serve intake form. An
+application is taken by a signed-in agent or driven by an authenticated
+integration. A public form is an unauthenticated write surface and wants its own
+rate limiting, abuse handling, and identity story rather than a route bolted
+onto this one.
 
 **6.2** carries the most legal weight of anything on this list. The statutory
 disposition clock starts at the move-out, and today a move-out can only be

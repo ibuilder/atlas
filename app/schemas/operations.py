@@ -23,7 +23,14 @@ from app.models.documents import (
     EnvelopeStatus,
     SignerStatus,
 )
-from app.models.leasing import ApplicationStatus, LeadStatus, LeaseStatus
+from app.models.leasing import (
+    ApplicantRole,
+    ApplicationStatus,
+    LeadStatus,
+    LeaseStatus,
+    ScreeningRecommendation,
+    ScreeningStatus,
+)
 from app.models.maintenance import Priority, RequestStatus, WorkOrderStatus
 from app.models.resident import ResidentStatus, TenancyRole
 from app.schemas.common import (
@@ -39,6 +46,16 @@ Phone = Annotated[str, StringConstraints(max_length=40)]
 
 __all__ = [
     "ApplicationDecision",
+    "ApplicantCreate",
+    "ApplicantOut",
+    "ApplicationCreate",
+    "ApplicationListQuery",
+    "ApplicationWithdraw",
+    "AssessmentOut",
+    "LeaseFromApplication",
+    "ScreeningOut",
+    "ScreeningRecord",
+    "ScreeningRequest",
     "DepositBalanceOut",
     "DepositCollect",
     "DepositMovementListQuery",
@@ -604,3 +621,109 @@ class EnvelopeOut(AtlasResponse):
     expires_at: dt.datetime | None = None
     voided_reason: str | None = None
     created_at: dt.datetime
+
+
+# ------------------------------------------------------- applications
+
+
+class ApplicationListQuery(ListQuery):
+    status: ApplicationStatus | None = None
+    property_id: str | None = None
+    unit_id: str | None = None
+
+
+class ApplicationCreate(AtlasRequest):
+    property_id: str
+    unit_id: str | None = None
+    lead_id: str | None = None
+    desired_move_in: dt.date | None = None
+    lease_term_months: int = Field(default=12, ge=1, le=120)
+    quoted_rent: Decimal | None = Field(default=None, ge=0)
+    application_fee: Decimal | None = Field(default=None, ge=0)
+
+
+class ApplicantCreate(AtlasRequest):
+    first_name: ShortText
+    last_name: ShortText
+    role: ApplicantRole = ApplicantRole.PRIMARY
+    email: Email | None = None
+    phone: Annotated[str, StringConstraints(max_length=40)] | None = None
+    monthly_income: Decimal | None = Field(default=None, ge=0)
+    employer_name: ShortText | None = None
+    resident_id: str | None = None
+
+
+class ApplicantOut(AtlasResponse):
+    id: str
+    application_id: str
+    first_name: str
+    last_name: str
+    role: ApplicantRole
+    email: str | None = None
+    monthly_income: Decimal | None = None
+    employer_name: str | None = None
+    #: Consent evidence. A screening ordered without it is a statutory
+    #: violation, so the record of it is part of the applicant, not a flag.
+    screening_consent_at: dt.datetime | None = None
+    screening_consent_ip: str | None = None
+
+
+class ScreeningRequest(AtlasRequest):
+    applicant_id: str
+    provider: Annotated[str, StringConstraints(max_length=60)] = "manual"
+
+
+class ScreeningRecord(AtlasRequest):
+    recommendation: ScreeningRecommendation
+    credit_score: int | None = Field(default=None, ge=300, le=900)
+    has_eviction_history: bool | None = None
+    has_criminal_record: bool | None = None
+    verified_monthly_income: Decimal | None = Field(default=None, ge=0)
+    provider_reference: Annotated[str, StringConstraints(max_length=120)] | None = None
+
+
+class ScreeningOut(AtlasResponse):
+    id: str
+    application_id: str
+    applicant_id: str
+    status: ScreeningStatus
+    provider: str
+    recommendation: ScreeningRecommendation | None = None
+    credit_score: int | None = None
+    has_eviction_history: bool | None = None
+    has_criminal_record: bool | None = None
+    verified_monthly_income: Decimal | None = None
+    completed_at: dt.datetime | None = None
+    expires_on: dt.date | None = None
+
+
+class AssessmentOut(AtlasResponse):
+    """What the criteria say. A recommendation, never a decision."""
+
+    recommendation: ScreeningRecommendation
+    income_ratio: Decimal | None = None
+    lowest_credit_score: int | None = None
+    #: Why it would be declined.
+    reasons: list[str] = Field(default_factory=list)
+    #: What is not yet known. Distinct from reasons: an application short of a
+    #: document is a different conversation from one that fails on its merits.
+    missing: list[str] = Field(default_factory=list)
+
+
+class ApplicationWithdraw(AtlasRequest):
+    reason: Annotated[str, StringConstraints(max_length=255)] | None = None
+
+
+class LeaseFromApplication(AtlasRequest):
+    start_date: dt.date
+    end_date: dt.date
+    rent_amount: Decimal | None = Field(default=None, ge=0)
+    #: Omitted falls back to the rent. Zero is honoured as zero - a
+    #: deposit-replacement rider in place of a deposit is a real arrangement.
+    security_deposit: Decimal | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _dates_make_sense(self) -> LeaseFromApplication:
+        if self.end_date <= self.start_date:
+            raise ValueError("a lease must end after it starts")
+        return self

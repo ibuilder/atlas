@@ -11,14 +11,14 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
 from werkzeug.wrappers import Response
 
-from app.errors import AtlasError
+from app.errors import AtlasError, ValidationFailed
 from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.accounting import BankAccount, Invoice, InvoiceStatus
@@ -30,7 +30,7 @@ from app.models.iam import (
     RolePermission,
     User,
 )
-from app.models.leasing import Lease, LeaseStatus
+from app.models.leasing import Application, Lease, LeaseStatus
 from app.models.maintenance import WORK_ORDER_TERMINAL, MaintenanceRequest, WorkOrder
 from app.models.org import Property, Unit, UnitStatus
 from app.models.types import utcnow
@@ -303,7 +303,7 @@ def deposits() -> str:
                 for lease_id, held in balances.items()
                 if held != Decimal("0")
             ),
-            key=lambda holding: (holding.lease.lease_number if holding.lease else holding.lease_id),
+            key=lambda holding: holding.lease.lease_number if holding.lease else holding.lease_id,
         )
         accounts.append(_TrustAccountView(account=account, holdings=holdings))
 
@@ -387,6 +387,66 @@ def ownership() -> str:
         rows=rows,
         as_of=as_of,
         owners=sorted(owners.values(), key=lambda owner: owner.name),
+    )
+
+
+@admin_bp.get("/applications")
+@login_required
+def applications() -> str:
+    """The leasing funnel: what has come in and what is waiting on a decision."""
+    require(Perm.APPLICATION_READ)
+    org_id = require_org_scope()
+
+    from app.models.leasing import ApplicationStatus
+
+    status = (request.args.get("status") or "").strip()
+    stmt = select(Application).where(Application.org_id == org_id)
+    if status in {member.value for member in ApplicationStatus}:
+        stmt = stmt.where(Application.status == status)
+
+    records = list(
+        db.session.execute(stmt.order_by(Application.created_at.desc()).limit(200)).scalars()
+    )
+    properties = {
+        record.id: record
+        for record in db.session.execute(
+            select(Property).where(Property.org_id == org_id)
+        ).scalars()
+    }
+    return render_template(
+        "admin/applications.html",
+        applications=records,
+        properties=properties,
+        units=list(
+            db.session.execute(
+                select(Unit).where(Unit.org_id == org_id).order_by(Unit.unit_number).limit(500)
+            ).scalars()
+        ),
+        status=status,
+        statuses=[member.value for member in ApplicationStatus],
+    )
+
+
+@admin_bp.get("/applications/<id:application_id>")
+@login_required
+def application_detail(application_id: str) -> str:
+    """One application, its applicants and screenings, and the assessment.
+
+    The assessment recommends; a person decides. It is shown with its reasons
+    and with what is still missing, because an application short of a document
+    is a different conversation from one that fails on its merits.
+    """
+    require(Perm.APPLICATION_READ)
+    org_id = require_org_scope()
+
+    from app.services.leasing.applications import assess_application
+
+    record = _application_or_404(application_id, org_id)
+    return render_template(
+        "admin/application.html",
+        application=record,
+        assessment=assess_application(current_session(), application=record),
+        property=db.session.get(Property, record.property_id),
     )
 
 
@@ -777,6 +837,227 @@ def turn_action(turn_id: str) -> Response:
             message = "Turn cancelled."
         else:
             flash("That is not something you can do to a turn.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back
+
+
+def _application_or_404(application_id: str, org_id: str) -> Application:
+    record = db.session.get(Application, application_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    return record
+
+
+def _decimal_or_none(raw: str | None) -> Decimal | None:
+    """A blank box means "not stated", which is not the same as zero.
+
+    ``Decimal("NaN")`` and ``Decimal("Infinity")`` both parse happily, and then
+    every ordered comparison downstream *raises* rather than returning False.
+    Finiteness is checked here so the refusal lands on the form, not on a 500.
+    """
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = Decimal(text)
+    except InvalidOperation as exc:
+        raise ValidationFailed(f"{text!r} is not an amount.") from exc
+    if not value.is_finite():
+        raise ValidationFailed(f"{text!r} is not an amount.")
+    return value
+
+
+@admin_bp.post("/applications")
+@login_required
+def application_create() -> Response:
+    """Open a draft application, the way a leasing agent takes one by phone."""
+    require(Perm.APPLICATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.applications import create_application
+
+    form = request.form
+    try:
+        move_in = (form.get("desired_move_in") or "").strip()
+        record = create_application(
+            current_session(),
+            org_id=org_id,
+            property_id=form.get("property_id") or "",
+            unit_id=(form.get("unit_id") or "").strip() or None,
+            desired_move_in=dt.date.fromisoformat(move_in) if move_in else None,
+            lease_term_months=int(form.get("lease_term_months") or 12),
+            quoted_rent=_decimal_or_none(form.get("quoted_rent")),
+            application_fee=_decimal_or_none(form.get("application_fee")),
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("admin.applications"))
+
+    flash(f"Application {record.application_number} opened.", "success")
+    return redirect(url_for("admin.application_detail", application_id=record.id))
+
+
+@admin_bp.post("/applications/<id:application_id>/applicants")
+@login_required
+def application_add_applicant(application_id: str) -> Response:
+    """Add a person to the application."""
+    require(Perm.APPLICATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.leasing import ApplicantRole
+    from app.services.leasing.applications import add_applicant
+
+    record = _application_or_404(application_id, org_id)
+    back = redirect(url_for("admin.application_detail", application_id=application_id))
+    form = request.form
+
+    try:
+        add_applicant(
+            current_session(),
+            application=record,
+            first_name=(form.get("first_name") or "").strip(),
+            last_name=(form.get("last_name") or "").strip(),
+            role=ApplicantRole(form.get("role") or ApplicantRole.PRIMARY.value),
+            email=(form.get("email") or "").strip() or None,
+            phone=(form.get("phone") or "").strip() or None,
+            monthly_income=_decimal_or_none(form.get("monthly_income")),
+            employer_name=(form.get("employer_name") or "").strip() or None,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Applicant added.", "success")
+    return back
+
+
+@admin_bp.post("/applicants/<id:applicant_id>/consent")
+@login_required
+def applicant_consent(applicant_id: str) -> Response:
+    """Record that this applicant consented to being screened.
+
+    The address comes from the connection, never from the form. Consent
+    evidence the submitter can dictate is not evidence, and this is the only
+    moment the real one exists.
+    """
+    require(Perm.APPLICATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.leasing import Applicant
+    from app.services.leasing.applications import record_consent
+
+    applicant = db.session.get(Applicant, applicant_id)
+    if applicant is None or applicant.org_id != org_id:
+        abort(404)
+    back = redirect(url_for("admin.application_detail", application_id=applicant.application_id))
+
+    try:
+        record_consent(
+            current_session(),
+            applicant=applicant,
+            ip_address=request.remote_addr or "unknown",
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Consent recorded.", "success")
+    return back
+
+
+@admin_bp.post("/applications/<id:application_id>/submit")
+@login_required
+def application_submit(application_id: str) -> Response:
+    """Move a draft into the pipeline."""
+    require(Perm.APPLICATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.applications import submit_application
+
+    record = _application_or_404(application_id, org_id)
+    back = redirect(url_for("admin.application_detail", application_id=application_id))
+
+    try:
+        submit_application(current_session(), application=record, actor_id=current_user.id)
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Application submitted.", "success")
+    return back
+
+
+@admin_bp.post("/applications/<id:application_id>/decision")
+@login_required
+def application_decision(application_id: str) -> Response:
+    """Approve, approve with conditions, or deny - always with a reason.
+
+    The reason is mandatory on every outcome, not only denials. Those words
+    become the adverse-action notice, and an approval that needs no explanation
+    is what makes the denials beside it look arbitrary.
+    """
+    require(Perm.APPLICATION_DECIDE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.applications import approve_application, deny_application
+
+    record = _application_or_404(application_id, org_id)
+    back = redirect(url_for("admin.application_detail", application_id=application_id))
+    action = (request.form.get("action") or "").strip().lower()
+    reason = (request.form.get("reason") or "").strip()
+    if not reason:
+        flash("A decision needs a reason. That reason is the notice.", "error")
+        return back
+
+    try:
+        if action == "deny":
+            deny_application(
+                current_session(),
+                application=record,
+                decided_by_id=current_user.id,
+                reasons=[reason],
+            )
+            message = "Application denied."
+        elif action in {"approve", "approve_with_conditions"}:
+            # One condition per line. An empty box is refused rather than
+            # quietly downgraded to a plain approval: "approved subject to a
+            # co-signer" and "approved" are different tenancies.
+            conditions = [
+                line.strip()
+                for line in (request.form.get("conditions") or "").splitlines()
+                if line.strip()
+            ]
+            if action == "approve_with_conditions" and not conditions:
+                flash("A conditional approval has to say what the conditions are.", "error")
+                return back
+            approve_application(
+                current_session(),
+                application=record,
+                decided_by_id=current_user.id,
+                conditions={"conditions": conditions} if conditions else None,
+                reason=reason,
+            )
+            message = (
+                "Application approved with conditions." if conditions else "Application approved."
+            )
+        else:
+            flash("That is not a decision an application can take.", "error")
             return back
         db.session.commit()
     except AtlasError as exc:

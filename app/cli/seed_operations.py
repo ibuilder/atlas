@@ -38,9 +38,7 @@ __all__ = ["seed_operations"]
 TODAY = utcnow().date()
 
 
-def seed_operations(
-    organization, properties, units, leases, vendor, users, accounts
-):  # noqa: ANN001, ANN201
+def seed_operations(organization, properties, units, leases, vendor, users, accounts):  # noqa: ANN001, ANN201
     """Layer the 0.2-0.5 features onto an existing demo organization."""
     summary: dict[str, int] = {}
 
@@ -61,6 +59,7 @@ def seed_operations(
     summary["message_threads"] = _seed_messages(organization, properties, leases, users)
     summary["turns"] = _seed_turns(organization, units, users)
     summary["envelopes"] = _seed_esign(organization, leases, users)
+    summary["applications"] = _seed_applications(organization, properties[0], units, users)
 
     db.session.flush()
     return summary
@@ -1126,3 +1125,132 @@ def _seed_esign(organization, leases, users) -> int:  # noqa: ANN001
 
     db.session.flush()
     return 2
+
+
+def _seed_applications(organization, prop, units, users) -> int:  # noqa: ANN001
+    """Three applications: one waiting, one approved with conditions, one denied.
+
+    A denial is seeded on purpose. The funnel's hardest surface to get right is
+    the one where somebody is told no, and a demo that only ever approves shows
+    none of the machinery that exists for it - the recorded reasons, the
+    criteria snapshotted at the decision, the individual assessment.
+    """
+    from app.models.org import UnitStatus
+    from app.services.leasing.applications import (
+        add_applicant,
+        approve_application,
+        create_application,
+        deny_application,
+        record_consent,
+        record_screening,
+        request_screening,
+        submit_application,
+    )
+
+    manager = users["property_manager"]
+    vacant = [
+        unit
+        for unit in units
+        if unit.org_id == organization.id and unit.status == UnitStatus.VACANT_READY
+    ]
+    session = current_session()
+
+    def _open(  # noqa: ANN202
+        first,  # noqa: ANN001
+        last,  # noqa: ANN001
+        income,  # noqa: ANN001
+        unit,  # noqa: ANN001
+        days_ago,  # noqa: ANN001
+        credit=None,  # noqa: ANN001
+        recommendation=None,  # noqa: ANN001
+        factors=None,  # noqa: ANN001
+    ):
+        application = create_application(
+            session,
+            org_id=organization.id,
+            property_id=prop.id,
+            unit_id=unit.id if unit else None,
+            desired_move_in=TODAY + dt.timedelta(days=30),
+            lease_term_months=12,
+            quoted_rent=Decimal("2150.00"),
+            application_fee=Decimal("45.00"),
+            actor_id=manager.id,
+        )
+        application.created_at = utcnow() - dt.timedelta(days=days_ago)
+        applicant = add_applicant(
+            session,
+            application=application,
+            first_name=first,
+            last_name=last,
+            email=f"{first.lower()}.{last.lower()}@example.invalid",
+            monthly_income=income,
+            employer_name="Meridian Labs",
+        )
+        # Consent before screening, with the address it was given from. The
+        # demo records a plausible one; the surfaces read it from the request.
+        record_consent(session, applicant=applicant, ip_address="198.51.100.23")
+        submit_application(session, application=application, actor_id=manager.id)
+        if recommendation is not None:
+            screening = request_screening(
+                session, application=application, applicant=applicant, provider="demo-bureau"
+            )
+            record_screening(
+                session,
+                screening=screening,
+                recommendation=recommendation,
+                credit_score=credit,
+                verified_monthly_income=income,
+                provider_reference="DEMO-0001",
+                factors=factors,
+            )
+        return application
+
+    from app.models.leasing import ScreeningRecommendation
+
+    # Still open, so the console has something waiting on a person.
+    _open("Rosa", "Villanueva", Decimal("7400.00"), vacant[0] if vacant else None, 3)
+
+    conditional = _open(
+        "Amir",
+        "Haddad",
+        Decimal("5600.00"),
+        vacant[1] if len(vacant) > 1 else None,
+        11,
+        credit=648,
+        recommendation=ScreeningRecommendation.APPROVE_WITH_CONDITIONS,
+    )
+    approve_application(
+        session,
+        application=conditional,
+        decided_by_id=manager.id,
+        conditions={"conditions": ["Guarantor required", "Two months' deposit"]},
+        reason="Verified income is 2.6x the rent, below the 3.0x threshold; a guarantor closes the gap.",
+    )
+
+    denied = _open(
+        "Jordan",
+        "Pike",
+        Decimal("3100.00"),
+        None,
+        20,
+        credit=571,
+        recommendation=ScreeningRecommendation.DECLINE,
+        # A decline without structured factors is recorded but flagged: no
+        # adverse-action notice can be written from "declined".
+        factors=[
+            {"code": "income_ratio", "detail": "Verified income is 1.4x the quoted rent."},
+            {"code": "credit_score", "detail": "Score of 571 against a 620 minimum."},
+        ],
+    )
+    deny_application(
+        session,
+        application=denied,
+        decided_by_id=manager.id,
+        reasons=[
+            "Verified income is 1.4x the quoted rent, below the 3.0x threshold in force.",
+            "Credit score of 571 is below the 620 minimum in force.",
+        ],
+    )
+
+    db.session.flush()
+    return 3
