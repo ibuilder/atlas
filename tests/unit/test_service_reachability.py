@@ -72,10 +72,6 @@ NO_SURFACE: dict[str, str] = {
 #: Reachable only from the demo seed. Better than nothing - the code has run
 #: against realistic data - and still not a way for a user to get there.
 SEED_ONLY: dict[str, str] = {
-    "accounting/reconciliation": (
-        "Statement import, matching, exceptions, and sign-off - the whole "
-        "bank reconciliation workspace."
-    ),
     "assets/lifecycle": (
         "Service history, warranty recovery, and the repair-or-replace call "
         "that the capital plan is built on."

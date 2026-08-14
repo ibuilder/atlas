@@ -1,0 +1,291 @@
+{# The reconciliation workspace.
+
+   The suggestions carry their reasons. A ranked list nobody can interrogate is
+   a list nobody should accept, and "why did it think that" is the first
+   question anybody asks of a 74% match.
+
+   Auto-match deliberately leaves near-ties alone. Guessing between two payments
+   of the same amount on the same day is how a reconciliation quietly stops
+   meaning anything.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Reconciliation · {{ app_name }}{% endblock %}
+{% block heading %}
+  {{ account.name if account else reconciliation.bank_account_id }} —
+  {{ reconciliation.statement_start.isoformat() }} to
+  {{ reconciliation.statement_end.isoformat() }}
+{% endblock %}
+{% block nav %}{{ admin_nav('reconciliations') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if reconciliation.difference == 0 %}
+  <span class="integrity"><span class="integrity__dot"></span> Agrees</span>
+{% else %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span>
+    Out by {{ reconciliation.difference | money }}</span>
+{% endif %}
+<span class="tiny muted">{{ reconciliation.status | humanize }}</span>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Tie-out</h2>
+    <span class="panel__hint">
+      {{ outstanding | length }} transaction{{ '' if outstanding | length == 1 else 's' }}
+      neither matched nor ignored
+    </span>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <tbody>
+        <tr>
+          <td>Statement opening</td>
+          <td class="num">{{ reconciliation.statement_opening_balance | money }}</td>
+        </tr>
+        <tr>
+          <td>Statement closing</td>
+          <td class="num">{{ reconciliation.statement_closing_balance | money }}</td>
+        </tr>
+        <tr>
+          <td>Cleared (opening plus everything matched)</td>
+          <td class="num">{{ reconciliation.cleared_balance | money }}</td>
+        </tr>
+        <tr>
+          <td>Ledger</td>
+          <td class="num">{{ reconciliation.ledger_balance | money }}</td>
+        </tr>
+        <tr>
+          <td><strong>Difference</strong></td>
+          <td class="num"><strong>{{ reconciliation.difference | money }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if can('reconciliation.manage') and reconciliation.status.value != 'completed' %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Import a statement</h2>
+    <span class="panel__hint">
+      Re-importing the same file inserts nothing
+    </span>
+  </div>
+  <p class="tiny muted">
+    Column names differ per bank, so they are configurable. Values are not: a
+    row whose amount will not parse is rejected loudly rather than imported as
+    zero, because a zero here is a difference somebody spends an afternoon
+    hunting.
+  </p>
+  <form method="post" enctype="multipart/form-data"
+        action="{{ url_for('admin.reconciliation_import',
+                           reconciliation_id=reconciliation.id) }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="statement">CSV export</label>
+    <input type="file" id="statement" name="statement" accept=".csv,text/csv">
+    <label for="date_column">Date column</label>
+    <input type="text" id="date_column" name="date_column" value="date">
+    <label for="amount_column">Amount column</label>
+    <input type="text" id="amount_column" name="amount_column" value="amount">
+    <label for="description_column">Description column</label>
+    <input type="text" id="description_column" name="description_column" value="description">
+    <button type="submit" class="btn">Import</button>
+  </form>
+
+  <form method="post"
+        action="{{ url_for('admin.reconciliation_auto_match',
+                           reconciliation_id=reconciliation.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn--quiet">
+      Auto-match what is unambiguous
+    </button>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Transactions</h2>
+    <span class="panel__hint">{{ transactions | length }} on this period</span>
+  </div>
+
+  {% if transactions %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Posted</th><th>Description</th><th class="num">Amount</th>
+              <th>Status</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for line in transactions %}
+            <tr>
+              <td class="tiny">{{ line.posted_date.isoformat() }}</td>
+              <td class="tiny">
+                {{ line.description }}
+                {%- if line.reference %}
+                  <span class="muted">· {{ line.reference }}</span>
+                {%- endif %}
+              </td>
+              <td class="num">{{ line.amount | money }}</td>
+              <td class="tiny">
+                {% if line.match_status == 'matched' %}
+                  {{ line.match_status | humanize }}
+                  {%- if line.match_confidence %}
+                    <span class="muted">{{ line.match_confidence }}%</span>
+                  {%- endif %}
+                {% else %}
+                  <span class="pill">{{ line.match_status | humanize }}</span>
+                {% endif %}
+              </td>
+              <td class="tiny">
+                {% if can('reconciliation.manage')
+                      and reconciliation.status.value != 'completed' %}
+                  {% if line.match_status == 'matched' %}
+                    <form method="post" class="inline-form"
+                          action="{{ url_for('admin.bank_transaction_action',
+                                             transaction_id=line.id) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button type="submit" name="action" value="unmatch" class="btn btn--quiet">
+                        Release
+                      </button>
+                    </form>
+                  {% elif suggestions.get(line.id) %}
+                    <form method="post" class="inline-form"
+                          action="{{ url_for('admin.bank_transaction_action',
+                                             transaction_id=line.id) }}">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <select name="journal_line_id">
+                        {% for candidate in suggestions[line.id][:5] %}
+                          <option value="{{ candidate.journal_line.id }}">
+                            {{ candidate.confidence }}% —
+                            {{ candidate.journal_line.memo or 'no memo' }}
+                            ({{ candidate.reasons | join(', ') }})
+                          </option>
+                        {% endfor %}
+                      </select>
+                      <button type="submit" name="action" value="match" class="btn btn--quiet">
+                        Match
+                      </button>
+                    </form>
+                  {% else %}
+                    <span class="muted">nothing suggested</span>
+                  {% endif %}
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No statement has been imported yet.</p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Exceptions</h2>
+    <span class="panel__hint">
+      {{ reconciliation.exceptions | length }} recorded,
+      {{ unresolved | length }} unresolved
+    </span>
+  </div>
+
+  {% if reconciliation.exceptions %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Kind</th><th>Description</th><th class="num">Amount</th>
+              <th>Resolved</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for item in reconciliation.exceptions %}
+            <tr>
+              <td class="tiny">{{ item.kind | humanize }}</td>
+              <td class="tiny">{{ item.description }}</td>
+              <td class="num">
+                {{ item.amount | money if item.amount is not none else '—' }}
+              </td>
+              <td class="tiny muted">
+                {% if item.resolved_at %}
+                  {{ item.resolved_at.date().isoformat() }} — {{ item.resolution_note }}
+                {% else %}
+                  <span class="pill pill--critical">open</span>
+                {% endif %}
+              </td>
+              <td class="tiny">
+                {% if can('reconciliation.manage') and not item.resolved_at %}
+                  {# The note is required by the service: an exception closed
+                     without one is an exception nobody can audit. #}
+                  <form method="post" class="inline-form"
+                        action="{{ url_for('admin.reconciliation_exception_resolve',
+                                           exception_id=item.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="text" name="note" maxlength="1000" placeholder="What it was">
+                    <button type="submit" class="btn btn--quiet">Resolve</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nothing has been flagged.</p>
+  {% endif %}
+
+  {% if can('reconciliation.manage') and reconciliation.status.value != 'completed' %}
+    <form method="post"
+          action="{{ url_for('admin.reconciliation_exception',
+                             reconciliation_id=reconciliation.id) }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="kind">Kind</label>
+      <input type="text" id="kind" name="kind" maxlength="40" value="unexplained">
+      <label for="description">What does not agree</label>
+      <input type="text" id="description" name="description" maxlength="255" required>
+      <label for="amount">Amount</label>
+      <input type="text" id="amount" name="amount" inputmode="decimal">
+      <button type="submit" class="btn btn--quiet">Record an exception</button>
+    </form>
+  {% endif %}
+</div>
+
+{% if can('reconciliation.manage') and reconciliation.status.value != 'completed' %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Sign off</h2>
+    <span class="panel__hint">
+      {% if reconciliation.difference != 0 %}
+        Refused while it is out by {{ reconciliation.difference | money }}
+      {% elif unresolved %}
+        Refused while {{ unresolved | length }} exception(s) are open
+      {% elif outstanding %}
+        Refused while {{ outstanding | length }} transaction(s) are unaccounted for
+      {% else %}
+        Everything agrees
+      {% endif %}
+    </span>
+  </div>
+  <p class="tiny muted">
+    A reconciliation that can be signed while it is out is not a
+    reconciliation, so these refusals are the whole value of this screen.
+  </p>
+  <form method="post"
+        action="{{ url_for('admin.reconciliation_complete',
+                           reconciliation_id=reconciliation.id) }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="2" maxlength="4000"></textarea>
+    <button type="submit" class="btn">Complete</button>
+  </form>
+</div>
+{% endif %}
+
+<p class="tiny">
+  <a href="{{ url_for('admin.reconciliations') }}">Back to reconciliations</a>
+</p>
+{% endblock %}

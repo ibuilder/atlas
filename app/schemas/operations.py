@@ -17,6 +17,7 @@ from app.models.accounting import (
     InvoiceStatus,
     PaymentMethod,
     PaymentStatus,
+    ReconciliationStatus,
 )
 from app.models.documents import (
     DocumentCategory,
@@ -84,6 +85,18 @@ __all__ = [
     "InspectionItemOut",
     "InspectionOut",
     "InspectionListQuery",
+    "ReconciliationOpen",
+    "StatementImport",
+    "TransactionMatch",
+    "AutoMatchRequest",
+    "ExceptionRaise",
+    "ExceptionResolve",
+    "ReconciliationComplete",
+    "BankTransactionOut",
+    "MatchCandidateOut",
+    "ReconciliationExceptionOut",
+    "ReconciliationOut",
+    "ReconciliationListQuery",
     "ScreeningOut",
     "ScreeningRecord",
     "ScreeningRequest",
@@ -1047,3 +1060,121 @@ class InspectionListQuery(ListQuery):
     kind: InspectionKind | None = None
     property_id: str | None = None
     unit_id: str | None = None
+
+
+# ---------------------------------------------------------- reconciliation
+
+
+class ReconciliationOpen(AtlasRequest):
+    bank_account_id: str
+    statement_start: dt.date
+    statement_end: dt.date
+    opening_balance: Decimal
+    closing_balance: Decimal
+
+    @model_validator(mode="after")
+    def _period_makes_sense(self) -> ReconciliationOpen:
+        if self.statement_end < self.statement_start:
+            raise ValueError("a statement period must end on or after it starts")
+        return self
+
+
+class StatementImport(AtlasRequest):
+    bank_account_id: str
+    #: The export as the bank produced it. Column *names* differ per bank, so
+    #: they are configurable; values are not — a row whose amount will not
+    #: parse is rejected loudly rather than imported as zero, because a zero in
+    #: a reconciliation is a difference somebody spends an afternoon hunting.
+    csv: Annotated[str, StringConstraints(min_length=1, max_length=4_000_000)]
+    date_column: Annotated[str, StringConstraints(max_length=60)] = "date"
+    amount_column: Annotated[str, StringConstraints(max_length=60)] = "amount"
+    description_column: Annotated[str, StringConstraints(max_length=60)] = "description"
+    reference_column: Annotated[str, StringConstraints(max_length=60)] | None = "reference"
+    external_id_column: Annotated[str, StringConstraints(max_length=60)] | None = "id"
+    date_format: Annotated[str, StringConstraints(max_length=40)] | None = None
+
+
+class TransactionMatch(AtlasRequest):
+    journal_line_id: str
+    confidence: int | None = Field(default=None, ge=0, le=100)
+
+
+class AutoMatchRequest(AtlasRequest):
+    #: Only what is both confident *and* unambiguous is matched automatically.
+    #: A second candidate scoring near the first is exactly the case a person
+    #: has to look at.
+    threshold: int = Field(default=90, ge=50, le=100)
+
+
+class ExceptionRaise(AtlasRequest):
+    kind: Annotated[str, StringConstraints(max_length=40)]
+    description: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=3, max_length=255)
+    ]
+    amount: Decimal | None = None
+    bank_transaction_id: str | None = None
+
+
+class ExceptionResolve(AtlasRequest):
+    #: Mandatory. An exception closed without a note is one nobody can audit.
+    note: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=1000)]
+
+
+class ReconciliationComplete(AtlasRequest):
+    notes: Annotated[str, StringConstraints(max_length=4000)] | None = None
+
+
+class BankTransactionOut(AtlasResponse):
+    id: str
+    bank_account_id: str
+    posted_date: dt.date
+    amount: Decimal
+    description: str
+    reference: str | None = None
+    match_status: str
+    match_confidence: int | None = None
+    matched_journal_line_id: str | None = None
+    reconciliation_id: str | None = None
+
+
+class MatchCandidateOut(AtlasResponse):
+    journal_line_id: str
+    journal_entry_id: str
+    confidence: int
+    amount: Decimal
+    memo: str | None = None
+    #: Why this scored what it did. A suggestion nobody can interrogate is a
+    #: suggestion nobody should accept.
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ReconciliationExceptionOut(AtlasResponse):
+    id: str
+    kind: str
+    description: str
+    amount: Decimal | None = None
+    bank_transaction_id: str | None = None
+    resolved_at: dt.datetime | None = None
+    resolution_note: str | None = None
+
+
+class ReconciliationOut(AtlasResponse):
+    id: str
+    bank_account_id: str
+    statement_start: dt.date
+    statement_end: dt.date
+    statement_opening_balance: Decimal
+    statement_closing_balance: Decimal
+    #: Opening plus everything matched — the statement side of the tie-out.
+    cleared_balance: Decimal
+    ledger_balance: Decimal
+    difference: Decimal
+    status: ReconciliationStatus
+    completed_at: dt.datetime | None = None
+    completed_by_id: str | None = None
+    notes: str | None = None
+
+
+class ReconciliationListQuery(ListQuery):
+    bank_account_id: str | None = None
+    status: ReconciliationStatus | None = None

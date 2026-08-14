@@ -390,6 +390,381 @@ def ownership() -> str:
     )
 
 
+@admin_bp.get("/reconciliations")
+@login_required
+def reconciliations() -> str:
+    """Every tie-out, newest statement first."""
+    require(Perm.RECONCILIATION_READ)
+    org_id = require_org_scope()
+
+    from app.models.accounting import Reconciliation, ReconciliationStatus
+
+    stmt = select(Reconciliation).where(Reconciliation.org_id == org_id)
+    status = (request.args.get("status") or "").strip()
+    if status in {member.value for member in ReconciliationStatus}:
+        stmt = stmt.where(Reconciliation.status == status)
+
+    records = list(
+        db.session.execute(stmt.order_by(Reconciliation.statement_end.desc()).limit(200)).scalars()
+    )
+    return render_template(
+        "admin/reconciliations.html",
+        reconciliations=records,
+        accounts=_bank_accounts_by_id(org_id),
+        status=status,
+        statuses=[member.value for member in ReconciliationStatus],
+    )
+
+
+@admin_bp.get("/reconciliations/<id:reconciliation_id>")
+@login_required
+def reconciliation_detail(reconciliation_id: str) -> str:
+    """The workspace: what is matched, what is not, and what is out.
+
+    The difference is shown from the stored figures rather than recomputed for
+    display, because the number somebody signs off has to be the number the
+    record holds.
+    """
+    require(Perm.RECONCILIATION_READ)
+    org_id = require_org_scope()
+
+    from app.models.accounting import BankTransaction
+    from app.services.accounting.reconciliation import (
+        MatchStatus,
+        refresh_totals,
+        suggest_matches,
+        unresolved_exceptions,
+    )
+
+    record = _reconciliation_or_404(reconciliation_id, org_id)
+    refresh_totals(current_session(), reconciliation=record)
+    db.session.commit()
+
+    transactions = list(
+        db.session.execute(
+            select(BankTransaction)
+            .where(
+                BankTransaction.org_id == org_id,
+                BankTransaction.reconciliation_id == reconciliation_id,
+            )
+            .order_by(BankTransaction.posted_date)
+        ).scalars()
+    )
+    outstanding = [
+        record_
+        for record_ in transactions
+        if record_.match_status not in (MatchStatus.MATCHED, MatchStatus.IGNORED)
+    ]
+    return render_template(
+        "admin/reconciliation.html",
+        reconciliation=record,
+        account=db.session.get(BankAccount, record.bank_account_id),
+        transactions=transactions,
+        outstanding=outstanding,
+        # Suggestions for the first few unmatched lines only. Scoring every
+        # line against the whole ledger on a page load is how a workspace
+        # becomes something nobody opens.
+        suggestions={
+            record_.id: suggest_matches(current_session(), transaction=record_)
+            for record_ in outstanding[:10]
+        },
+        unresolved=unresolved_exceptions(current_session(), record),
+    )
+
+
+@admin_bp.post("/reconciliations")
+@login_required
+def reconciliation_open() -> Response:
+    """Start a reconciliation over a statement window."""
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.accounting.reconciliation import open_reconciliation
+
+    form = request.form
+    back = redirect(url_for("admin.reconciliations"))
+
+    try:
+        opening = _decimal_or_none(form.get("opening_balance"))
+        closing = _decimal_or_none(form.get("closing_balance"))
+        if opening is None or closing is None:
+            raise ValidationFailed("Both balances are needed to tie out against.")
+        record = open_reconciliation(
+            current_session(),
+            org_id=org_id,
+            bank_account_id=form.get("bank_account_id") or "",
+            statement_start=dt.date.fromisoformat(form.get("statement_start") or ""),
+            statement_end=dt.date.fromisoformat(form.get("statement_end") or ""),
+            opening_balance=opening,
+            closing_balance=closing,
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date or an amount."), "error")
+        return back
+
+    flash("Reconciliation opened.", "success")
+    return redirect(url_for("admin.reconciliation_detail", reconciliation_id=record.id))
+
+
+@admin_bp.post("/reconciliations/<id:reconciliation_id>/statement")
+@login_required
+def reconciliation_import(reconciliation_id: str) -> Response:
+    """Load a bank CSV export.
+
+    Re-importing the same file inserts nothing: each line carries a stable
+    fingerprint including an occurrence index, so two genuinely identical
+    transactions on one day both survive while a repeat of either does not.
+    """
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.accounting.reconciliation import import_statement, parse_statement_csv
+
+    record = _reconciliation_or_404(reconciliation_id, org_id)
+    back = redirect(url_for("admin.reconciliation_detail", reconciliation_id=reconciliation_id))
+
+    upload = request.files.get("statement")
+    text = (
+        upload.read().decode("utf-8-sig", errors="replace")
+        if upload is not None and upload.filename
+        else (request.form.get("csv") or "")
+    )
+    if not text.strip():
+        flash("There was nothing to import.", "error")
+        return back
+
+    try:
+        lines = parse_statement_csv(
+            text,
+            date_column=(request.form.get("date_column") or "date").strip(),
+            amount_column=(request.form.get("amount_column") or "amount").strip(),
+            description_column=(request.form.get("description_column") or "description").strip(),
+        )
+        result = import_statement(
+            current_session(),
+            org_id=org_id,
+            bank_account_id=record.bank_account_id,
+            lines=lines,
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That file could not be read as a bank statement."), "error")
+        return back
+
+    flash(
+        f"{result.count} imported, {result.duplicates} already present, "
+        f"{result.rejected} rejected.",
+        "success",
+    )
+    return back
+
+
+@admin_bp.post("/reconciliations/<id:reconciliation_id>/auto-match")
+@login_required
+def reconciliation_auto_match(reconciliation_id: str) -> Response:
+    """Match what is confident and unambiguous, and leave the rest.
+
+    A near-tie stays unmatched on purpose. Guessing between two payments of the
+    same amount on the same day is how a reconciliation quietly stops meaning
+    anything.
+    """
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.accounting.reconciliation import auto_match
+
+    record = _reconciliation_or_404(reconciliation_id, org_id)
+    back = redirect(url_for("admin.reconciliation_detail", reconciliation_id=reconciliation_id))
+
+    try:
+        matched = auto_match(
+            current_session(),
+            org_id=org_id,
+            bank_account_id=record.bank_account_id,
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(
+        f"{len(matched)} matched. Anything left needs a person, which is the point.",
+        "success",
+    )
+    return back
+
+
+@admin_bp.post("/bank-transactions/<id:transaction_id>")
+@login_required
+def bank_transaction_action(transaction_id: str) -> Response:
+    """Match a bank line to a ledger line, or release one."""
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.accounting import BankTransaction, JournalLine
+    from app.services.accounting.reconciliation import match_transaction, unmatch_transaction
+
+    record = db.session.get(BankTransaction, transaction_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    back = redirect(
+        url_for("admin.reconciliation_detail", reconciliation_id=record.reconciliation_id)
+        if record.reconciliation_id
+        else url_for("admin.reconciliations")
+    )
+    action = (request.form.get("action") or "").strip().lower()
+
+    try:
+        if action == "match":
+            line = db.session.get(JournalLine, request.form.get("journal_line_id") or "")
+            if line is None or line.org_id != org_id:
+                abort(404)
+            match_transaction(
+                current_session(),
+                transaction=record,
+                journal_line=line,
+                actor_id=current_user.id,
+            )
+            message = "Matched."
+        elif action == "unmatch":
+            unmatch_transaction(current_session(), transaction=record)
+            message = "Released."
+        else:
+            flash("That is not something you can do to a bank line.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back
+
+
+@admin_bp.post("/reconciliations/<id:reconciliation_id>/exceptions")
+@login_required
+def reconciliation_exception(reconciliation_id: str) -> Response:
+    """Record something that does not agree and needs a person."""
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.accounting.reconciliation import raise_exception
+
+    record = _reconciliation_or_404(reconciliation_id, org_id)
+    back = redirect(url_for("admin.reconciliation_detail", reconciliation_id=reconciliation_id))
+
+    try:
+        raise_exception(
+            current_session(),
+            reconciliation=record,
+            kind=(request.form.get("kind") or "unexplained").strip(),
+            description=(request.form.get("description") or "").strip(),
+            amount=_decimal_or_none(request.form.get("amount")),
+            bank_transaction_id=(request.form.get("bank_transaction_id") or "").strip() or None,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not an amount."), "error")
+        return back
+
+    flash("Exception recorded.", "success")
+    return back
+
+
+@admin_bp.post("/reconciliation-exceptions/<id:exception_id>")
+@login_required
+def reconciliation_exception_resolve(exception_id: str) -> Response:
+    """Close an exception, with the note that makes it auditable."""
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.accounting import ReconciliationException
+    from app.services.accounting.reconciliation import resolve_exception
+
+    record = db.session.get(ReconciliationException, exception_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    back = redirect(
+        url_for("admin.reconciliation_detail", reconciliation_id=record.reconciliation_id)
+    )
+
+    try:
+        resolve_exception(
+            current_session(),
+            exception=record,
+            resolved_by_id=current_user.id,
+            note=request.form.get("note") or "",
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Exception resolved.", "success")
+    return back
+
+
+@admin_bp.post("/reconciliations/<id:reconciliation_id>/complete")
+@login_required
+def reconciliation_complete(reconciliation_id: str) -> Response:
+    """Sign off. Refuses anything that does not actually agree.
+
+    A reconciliation that can be signed while it is out is not a
+    reconciliation, so the refusals here are the whole value of the screen.
+    """
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.accounting.reconciliation import complete_reconciliation
+
+    record = _reconciliation_or_404(reconciliation_id, org_id)
+    back = redirect(url_for("admin.reconciliation_detail", reconciliation_id=reconciliation_id))
+
+    try:
+        complete_reconciliation(
+            current_session(),
+            reconciliation=record,
+            completed_by_id=current_user.id,
+            notes=(request.form.get("notes") or "").strip() or None,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Reconciled and signed off.", "success")
+    return back
+
+
+def _reconciliation_or_404(reconciliation_id: str, org_id: str):  # noqa: ANN202 - Reconciliation
+    from app.models.accounting import Reconciliation
+
+    record = db.session.get(Reconciliation, reconciliation_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    return record
+
+
+def _bank_accounts_by_id(org_id: str) -> dict[str, BankAccount]:
+    return {
+        account.id: account
+        for account in db.session.execute(
+            select(BankAccount).where(BankAccount.org_id == org_id)
+        ).scalars()
+    }
+
+
 @admin_bp.get("/inspections")
 @login_required
 def inspections() -> str:

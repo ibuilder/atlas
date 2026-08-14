@@ -22,6 +22,7 @@ from app.errors import NotFound
 from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.accounting import (
+    BankTransaction,
     Bill,
     BillPayment,
     BillStatus,
@@ -29,11 +30,16 @@ from app.models.accounting import (
     Invoice,
     InvoiceStatus,
     JournalEntry,
+    JournalLine,
     Payment,
+    Reconciliation,
+    ReconciliationException,
 )
 from app.models.leasing import Lease
 from app.models.types import utcnow
 from app.schemas.operations import (
+    AutoMatchRequest,
+    BankTransactionOut,
     BillApproval,
     BillCreate,
     BillLineOut,
@@ -46,16 +52,25 @@ from app.schemas.operations import (
     DepositMovementListQuery,
     DepositMovementOut,
     DepositRelease,
+    ExceptionRaise,
+    ExceptionResolve,
     InvoiceListQuery,
     InvoiceOut,
     JournalEntryCreate,
     JournalEntryOut,
     PaymentCreate,
     PaymentOut,
+    ReconciliationComplete,
+    ReconciliationExceptionOut,
+    ReconciliationListQuery,
+    ReconciliationOpen,
+    ReconciliationOut,
+    StatementImport,
+    TransactionMatch,
 )
 from app.security.permissions import Perm
 from app.security.policies import filter_permitted, require
-from app.services.accounting import deposits, ledger, payables, receivables
+from app.services.accounting import deposits, ledger, payables, receivables, reconciliation
 from app.services.common.unit_of_work import transaction
 
 __all__ = []
@@ -538,3 +553,316 @@ def outstanding_payable() -> Response:
             ),
         }
     )
+
+
+# ---------------------------------------------------------- reconciliation
+#
+# The workspace behind a monthly tie-out. Two things here are the point:
+#
+# Auto-matching only takes what is both confident *and* unambiguous. A second
+# candidate scoring near the first is exactly the case a person has to look at,
+# and a machine that resolves it silently is a machine that hides the one
+# transaction worth finding.
+#
+# Sign-off refuses anything that does not actually agree — a non-zero
+# difference, an unresolved exception, or a transaction that is neither matched
+# nor deliberately ignored. A reconciliation that can be signed while out is not
+# a reconciliation.
+
+
+def _reconciliation_or_404(reconciliation_id: str, org_id: str) -> Reconciliation:
+    record = db.session.get(Reconciliation, reconciliation_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That reconciliation was not found.")
+    return record
+
+
+def _transaction_or_404(transaction_id: str, org_id: str) -> BankTransaction:
+    record = db.session.get(BankTransaction, transaction_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That bank transaction was not found.")
+    return record
+
+
+@api_v1_bp.get("/reconciliations", endpoint="reconciliations_list")
+def list_reconciliations() -> Response:
+    require(Perm.RECONCILIATION_READ)
+    query = parse_query(ReconciliationListQuery)
+    org_id = require_org_scope()
+
+    stmt = select(Reconciliation).where(Reconciliation.org_id == org_id)
+    if query.bank_account_id:
+        stmt = stmt.where(Reconciliation.bank_account_id == query.bank_account_id)
+    if query.status:
+        stmt = stmt.where(Reconciliation.status == query.status)
+
+    page = paginate(current_session(), stmt, Reconciliation, limit=query.limit, cursor=query.cursor)
+    return respond_collection(page, ReconciliationOut)
+
+
+@api_v1_bp.get("/reconciliations/<id:reconciliation_id>", endpoint="reconciliations_get")
+def get_reconciliation(reconciliation_id: str) -> Response:
+    """One reconciliation, its transactions, and what is still unresolved."""
+    require(Perm.RECONCILIATION_READ)
+    org_id = require_org_scope()
+
+    record = _reconciliation_or_404(reconciliation_id, org_id)
+    transactions = list(
+        db.session.execute(
+            select(BankTransaction)
+            .where(
+                BankTransaction.org_id == org_id,
+                BankTransaction.reconciliation_id == reconciliation_id,
+            )
+            .order_by(BankTransaction.posted_date)
+        ).scalars()
+    )
+    return respond(
+        {
+            **ReconciliationOut.model_validate(record, from_attributes=True).model_dump(
+                mode="json"
+            ),
+            "transactions": [
+                BankTransactionOut.model_validate(t, from_attributes=True).model_dump(mode="json")
+                for t in transactions
+            ],
+            "exceptions": [
+                ReconciliationExceptionOut.model_validate(e, from_attributes=True).model_dump(
+                    mode="json"
+                )
+                for e in record.exceptions
+            ],
+        }
+    )
+
+
+@api_v1_bp.post("/reconciliations", endpoint="reconciliations_open")
+def open_reconciliation() -> Response:
+    """Start a reconciliation over a statement window."""
+    require(Perm.RECONCILIATION_MANAGE)
+    payload = parse_body(ReconciliationOpen)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = reconciliation.open_reconciliation(
+            session,
+            org_id=org_id,
+            bank_account_id=payload.bank_account_id,
+            statement_start=payload.statement_start,
+            statement_end=payload.statement_end,
+            opening_balance=payload.opening_balance,
+            closing_balance=payload.closing_balance,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        ReconciliationOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/reconciliations/{record.id}",
+    )
+
+
+@api_v1_bp.post("/bank-statements", endpoint="bank_statements_import")
+def import_statement() -> Response:
+    """Load a bank CSV export.
+
+    Re-importing the same file inserts nothing: each line carries a stable
+    fingerprint that includes an occurrence index, so two genuinely identical
+    transactions on one day both survive while a repeat import of either does
+    not.
+    """
+    require(Perm.RECONCILIATION_MANAGE)
+    payload = parse_body(StatementImport)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        lines = reconciliation.parse_statement_csv(
+            payload.csv,
+            date_column=payload.date_column,
+            amount_column=payload.amount_column,
+            description_column=payload.description_column,
+            reference_column=payload.reference_column,
+            external_id_column=payload.external_id_column,
+            date_format=payload.date_format,
+        )
+        result = reconciliation.import_statement(
+            session,
+            org_id=org_id,
+            bank_account_id=payload.bank_account_id,
+            lines=lines,
+            actor_id=current_user.id,
+        )
+        body = {
+            "imported": result.count,
+            "duplicates": result.duplicates,
+            "rejected": result.rejected,
+            "transactions": [
+                BankTransactionOut.model_validate(t, from_attributes=True).model_dump(mode="json")
+                for t in result.imported
+            ],
+        }
+
+    return respond(body, status=201)
+
+
+@api_v1_bp.get(
+    "/bank-transactions/<id:transaction_id>/matches", endpoint="bank_transactions_suggest"
+)
+def suggest_matches(transaction_id: str) -> Response:
+    """Ranked ledger lines that might be this bank line, with their reasons.
+
+    The reasons are returned because a suggestion nobody can interrogate is a
+    suggestion nobody should accept.
+    """
+    require(Perm.RECONCILIATION_READ)
+    org_id = require_org_scope()
+
+    record = _transaction_or_404(transaction_id, org_id)
+    candidates = reconciliation.suggest_matches(current_session(), transaction=record)
+    return respond(
+        {
+            "data": [
+                {
+                    "journal_line_id": candidate.journal_line.id,
+                    "journal_entry_id": candidate.journal_line.journal_entry_id,
+                    "confidence": candidate.confidence,
+                    "amount": str(candidate.journal_line.debit or candidate.journal_line.credit),
+                    "memo": candidate.journal_line.memo,
+                    "reasons": list(candidate.reasons),
+                }
+                for candidate in candidates
+            ]
+        }
+    )
+
+
+@api_v1_bp.post("/bank-transactions/<id:transaction_id>/match", endpoint="bank_transactions_match")
+def match_transaction(transaction_id: str) -> Response:
+    """Bind a bank line to a ledger line. One ledger line settles once."""
+    require(Perm.RECONCILIATION_MANAGE)
+    payload = parse_body(TransactionMatch)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = _transaction_or_404(transaction_id, org_id)
+        line = session.get(JournalLine, payload.journal_line_id)
+        if line is None or line.org_id != org_id:
+            raise NotFound("That ledger line was not found.")
+        matched = reconciliation.match_transaction(
+            session,
+            transaction=record,
+            journal_line=line,
+            confidence=payload.confidence,
+            actor_id=current_user.id,
+        )
+
+    return respond(BankTransactionOut.model_validate(matched, from_attributes=True))
+
+
+@api_v1_bp.post(
+    "/bank-transactions/<id:transaction_id>/unmatch", endpoint="bank_transactions_unmatch"
+)
+def unmatch_transaction(transaction_id: str) -> Response:
+    require(Perm.RECONCILIATION_MANAGE)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = reconciliation.unmatch_transaction(
+            session, transaction=_transaction_or_404(transaction_id, org_id)
+        )
+
+    return respond(BankTransactionOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post(
+    "/reconciliations/<id:reconciliation_id>/auto-match", endpoint="reconciliations_auto_match"
+)
+def auto_match(reconciliation_id: str) -> Response:
+    """Match only what is both confident and unambiguous.
+
+    A near-tie is left alone deliberately: that is exactly the transaction a
+    person needs to look at, and resolving it silently hides the one thing
+    worth finding.
+    """
+    require(Perm.RECONCILIATION_MANAGE)
+    payload = parse_body(AutoMatchRequest)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = _reconciliation_or_404(reconciliation_id, org_id)
+        matched = reconciliation.auto_match(
+            session,
+            org_id=org_id,
+            bank_account_id=record.bank_account_id,
+            threshold=payload.threshold,
+            actor_id=current_user.id,
+        )
+        matched_ids = [t.id for t in matched]
+
+    return respond({"matched": len(matched_ids), "transaction_ids": matched_ids})
+
+
+@api_v1_bp.post(
+    "/reconciliations/<id:reconciliation_id>/exceptions", endpoint="reconciliation_exceptions_raise"
+)
+def raise_exception(reconciliation_id: str) -> Response:
+    """Record something that does not agree and needs a person."""
+    require(Perm.RECONCILIATION_MANAGE)
+    payload = parse_body(ExceptionRaise)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = _reconciliation_or_404(reconciliation_id, org_id)
+        raised = reconciliation.raise_exception(
+            session,
+            reconciliation=record,
+            kind=payload.kind,
+            description=payload.description,
+            amount=payload.amount,
+            bank_transaction_id=payload.bank_transaction_id,
+        )
+
+    return respond_created(
+        ReconciliationExceptionOut.model_validate(raised, from_attributes=True),
+        location=f"/api/v1/reconciliations/{reconciliation_id}",
+    )
+
+
+@api_v1_bp.post(
+    "/reconciliation-exceptions/<id:exception_id>/resolve",
+    endpoint="reconciliation_exceptions_resolve",
+)
+def resolve_exception(exception_id: str) -> Response:
+    """Close an exception, with the note that makes it auditable."""
+    require(Perm.RECONCILIATION_MANAGE)
+    payload = parse_body(ExceptionResolve)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = session.get(ReconciliationException, exception_id)
+        if record is None or record.org_id != org_id:
+            raise NotFound("That exception was not found.")
+        resolved = reconciliation.resolve_exception(
+            session, exception=record, resolved_by_id=current_user.id, note=payload.note
+        )
+
+    return respond(ReconciliationExceptionOut.model_validate(resolved, from_attributes=True))
+
+
+@api_v1_bp.post(
+    "/reconciliations/<id:reconciliation_id>/complete", endpoint="reconciliations_complete"
+)
+def complete_reconciliation(reconciliation_id: str) -> Response:
+    """Sign off. Refuses anything that does not actually agree."""
+    require(Perm.RECONCILIATION_MANAGE)
+    payload = parse_body(ReconciliationComplete)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = reconciliation.complete_reconciliation(
+            session,
+            reconciliation=_reconciliation_or_404(reconciliation_id, org_id),
+            completed_by_id=current_user.id,
+            notes=payload.notes,
+        )
+
+    return respond(ReconciliationOut.model_validate(record, from_attributes=True))

@@ -12,6 +12,15 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **The bank reconciliation workspace is reachable** (ROADMAP 6.4). Import,
+  match, flag, and sign off from `/admin/reconciliations` and over the API;
+  previously only the demo seed exercised any of it. Suggestions carry the
+  reasons behind their score, because "why did it think that" is the first
+  question anybody asks of a 74% match. Auto-match leaves near-ties alone on
+  purpose. Sign-off refuses a non-zero difference, an open exception, or a
+  transaction that is neither matched nor deliberately ignored — a
+  reconciliation that can be signed while it is out is not a reconciliation.
+
 - **Inspections are reachable** (ROADMAP 6.5). Booking, recording, and
   sign-off from `/admin/inspections` and `/api/v1/inspections`; previously only
   the demo seed could reach any of it. The rule this exists for is evidence: a
