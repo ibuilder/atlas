@@ -64,9 +64,6 @@ NOT_A_SURFACE = {
 #: them. These are whole capabilities that exist in the codebase and not in the
 #: product.
 NO_SURFACE: dict[str, str] = {
-    "imports/bulk": (
-        "CSV import with a read-only plan step. The plan is the point and nobody can ask for one."
-    ),
     "documents/extraction": (
         "Field extraction from uploaded documents, and the accept-or-reject "
         "review that decides what is believed."

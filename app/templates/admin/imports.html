@@ -1,0 +1,167 @@
+{# Bulk import: plan, then apply.
+
+   The plan is the point. A CSV of four hundred units is not something anybody
+   can check by reading, so the page shows what would be created, what would be
+   updated and to what, and *every* problem in the file — not the first. An
+   operator fixing a spreadsheet one error per upload gives up before the file
+   is clean.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Import · {{ app_name }}{% endblock %}
+{% block heading %}Import{% endblock %}
+{% block nav %}{{ admin_nav('imports') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if plan %}
+  {% if plan.is_valid %}
+    <span class="integrity"><span class="integrity__dot"></span>
+      {{ plan.creates }} to create, {{ plan.updates }} to update</span>
+  {% else %}
+    <span class="integrity integrity--broken"><span class="integrity__dot"></span>
+      {{ plan.errors | length }} problem{{ '' if plan.errors | length == 1 else 's' }}</span>
+  {% endif %}
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Upload a file</h2>
+    <span class="panel__hint">Nothing is written until you confirm the plan</span>
+  </div>
+
+  <form method="post" action="{{ url_for('admin.import_plan') }}"
+        enctype="multipart/form-data" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="resource">What</label>
+    <select id="resource" name="resource" required>
+      {% for definition in importers %}
+        <option value="{{ definition.resource }}"
+                {% if resource == definition.resource %}selected{% endif %}>
+          {{ definition.name }}
+        </option>
+      {% endfor %}
+    </select>
+
+    <label for="file">CSV, up to {{ max_rows }} rows</label>
+    <input type="file" id="file" name="file" accept=".csv,text/csv" required>
+
+    <button type="submit" class="btn">Show me what it would do</button>
+  </form>
+
+  <p class="tiny muted">
+    Not sure of the columns?
+    {% for definition in importers %}
+      <a href="{{ url_for('admin.import_template', resource=definition.resource) }}">
+        {{ definition.name }} template</a>{{ ', ' if not loop.last else '' }}
+    {%- endfor %}.
+  </p>
+</div>
+
+{% for definition in importers %}
+  {% if resource == definition.resource or not resource %}
+    {% if loop.first or resource %}
+    <div class="panel">
+      <div class="panel__head">
+        <h2 class="panel__title">{{ definition.name }} columns</h2>
+        <span class="panel__hint">
+          {{ definition.required_columns | length }} required
+        </span>
+      </div>
+      <p class="tiny">
+        <strong>Required:</strong> {{ definition.required_columns | join(', ') }}
+      </p>
+      {% if definition.optional_columns %}
+        <p class="tiny muted">
+          <strong>Optional:</strong> {{ definition.optional_columns | join(', ') }}
+        </p>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% endif %}
+{% endfor %}
+
+{% if plan %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">The plan</h2>
+    <span class="panel__hint">
+      {{ plan.creates }} create · {{ plan.updates }} update ·
+      {{ plan.unchanged }} already match
+    </span>
+  </div>
+
+  {% if plan.errors %}
+    <p class="tiny">
+      <span class="pill pill--critical">Not imported</span>
+      Every problem is listed, not just the first. Nothing here has been
+      written — a partial import is worse than a failed one, because you cannot
+      tell which half landed and re-uploading duplicates the half that did.
+    </p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th class="num">Row</th><th>Column</th><th>Problem</th></tr></thead>
+        <tbody>
+          {% for error in plan.errors %}
+            <tr>
+              <td class="num tiny">{{ error.row }}</td>
+              <td class="tiny muted">{{ error.column or '—' }}</td>
+              <td class="tiny">{{ error.message }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th class="num">Row</th><th>Key</th><th>Action</th><th>Changes</th></tr>
+        </thead>
+        <tbody>
+          {% for row in plan.rows %}
+            <tr>
+              <td class="num tiny muted">{{ row.row }}</td>
+              <td class="tiny">{{ row.key }}</td>
+              <td class="tiny">
+                {% if row.action == 'create' %}
+                  <span class="pill">Create</span>
+                {% elif row.action == 'update' %}
+                  Update
+                {% else %}
+                  <span class="muted">No change</span>
+                {% endif %}
+              </td>
+              <td class="tiny muted">
+                {% for field, value in (row.changes or {}).items() %}
+                  {{ field }} → {{ value }}{{ '; ' if not loop.last else '' }}
+                {% else %}—{% endfor %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <form method="post" action="{{ url_for('admin.import_apply') }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="resource" value="{{ resource }}">
+      <input type="hidden" name="csv" value="{{ csv_text }}">
+      {# The counts are carried so the apply step can check the file still does
+         this. It re-plans rather than trusting the plan above: applying a
+         decision taken against a database that has moved since is how an
+         update quietly becomes a create. #}
+      <input type="hidden" name="expect_creates" value="{{ plan.creates }}">
+      <input type="hidden" name="expect_updates" value="{{ plan.updates }}">
+      <input type="hidden" name="expect_unchanged" value="{{ plan.unchanged }}">
+      <button type="submit" class="btn">
+        Apply: create {{ plan.creates }}, update {{ plan.updates }}
+      </button>
+    </form>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -118,6 +118,7 @@ def _register_routes() -> None:
         accounting,
         auth,
         documents,
+        imports,
         leasing,
         maintenance,
         meta,

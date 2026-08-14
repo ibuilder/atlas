@@ -399,6 +399,139 @@ def ownership() -> str:
     )
 
 
+@admin_bp.get("/imports")
+@login_required
+def imports() -> str:
+    """Upload a file and see what it would do before it does it."""
+    require(Perm.IMPORT_RUN)
+    require_org_scope()
+
+    from app.services.imports.bulk import MAX_ROWS, importer, known_importers
+
+    return render_template(
+        "admin/imports.html",
+        importers=[importer(name) for name in known_importers()],
+        max_rows=MAX_ROWS,
+        plan=None,
+        resource=None,
+        csv_text=None,
+    )
+
+
+@admin_bp.get("/imports/<resource>/template")
+@login_required
+def import_template(resource: str) -> Response:
+    """A header row, so nobody has to guess the columns."""
+    require(Perm.IMPORT_RUN)
+    require_org_scope()
+
+    from app.errors import NotFound as AtlasNotFound
+    from app.services.imports.bulk import template_for
+
+    try:
+        body = template_for(resource)
+    except (AtlasError, AtlasNotFound):
+        abort(404)
+
+    response = Response(body, mimetype="text/csv")
+    response.headers["Content-Disposition"] = f'attachment; filename="{resource}-template.csv"'
+    return response
+
+
+@admin_bp.post("/imports/plan")
+@login_required
+def import_plan() -> str | Response:
+    """What this file would do. Writes nothing at all.
+
+    The whole point of the module: a CSV of four hundred units is not something
+    anybody can check by reading, and an import that goes straight to writing
+    leaves the operator finding out afterwards.
+    """
+    require(Perm.IMPORT_RUN)
+    org_id = require_org_scope()
+
+    from app.services.imports.bulk import MAX_ROWS, importer, known_importers, plan_import
+
+    resource = (request.form.get("resource") or "").strip()
+    text = _uploaded_text("file") or (request.form.get("csv") or "")
+    if not text.strip():
+        flash("There was nothing to read.", "error")
+        return redirect(url_for("admin.imports"))
+
+    try:
+        plan = plan_import(current_session(), org_id=org_id, resource=resource, text=text)
+    except AtlasError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("admin.imports"))
+
+    return render_template(
+        "admin/imports.html",
+        importers=[importer(name) for name in known_importers()],
+        max_rows=MAX_ROWS,
+        plan=plan,
+        resource=resource,
+        # Carried through the form rather than stored: the apply step re-plans
+        # these same bytes, so nothing decided here has to survive a round trip.
+        csv_text=text,
+    )
+
+
+@admin_bp.post("/imports/apply")
+@login_required
+def import_apply() -> Response:
+    """Write the file, if it still does what was shown.
+
+    The plan is re-derived here rather than carried over. Applying a decision
+    taken against a database that has moved since is how an "update" quietly
+    becomes a "create"; if the fresh plan disagrees with what the operator
+    confirmed, that is a person's call and not this route's.
+    """
+    require(Perm.IMPORT_RUN)
+    org_id = require_org_scope()
+
+    from app.services.imports.bulk import apply_plan, plan_import
+
+    resource = (request.form.get("resource") or "").strip()
+    text = request.form.get("csv") or ""
+    back = redirect(url_for("admin.imports"))
+
+    try:
+        expected = (
+            int(request.form.get("expect_creates") or 0),
+            int(request.form.get("expect_updates") or 0),
+            int(request.form.get("expect_unchanged") or 0),
+        )
+        plan = plan_import(current_session(), org_id=org_id, resource=resource, text=text)
+        if plan.is_valid and (plan.creates, plan.updates, plan.unchanged) != expected:
+            flash(
+                f"This file no longer does what you were shown: {plan.creates} creates, "
+                f"{plan.updates} updates, {plan.unchanged} unchanged now, against the "
+                f"{expected[0]}/{expected[1]}/{expected[2]} you confirmed. Plan it again.",
+                "error",
+            )
+            return back
+        apply_plan(current_session(), org_id=org_id, plan=plan, actor_id=current_user.id)
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That file could not be applied."), "error")
+        return back
+
+    flash(
+        f"{plan.creates} created, {plan.updates} updated, {plan.unchanged} already matched.",
+        "success",
+    )
+    return back
+
+
+def _uploaded_text(field: str) -> str:
+    """Read an uploaded file as text, tolerating the BOM Excel writes."""
+    upload = request.files.get(field)
+    if upload is None or not upload.filename:
+        return ""
+    return upload.read().decode("utf-8-sig", errors="replace")
+
+
 @admin_bp.get("/identity-providers")
 @login_required
 def identity_providers() -> str:

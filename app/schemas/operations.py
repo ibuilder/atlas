@@ -97,6 +97,11 @@ __all__ = [
     "ReconciliationExceptionOut",
     "ReconciliationOut",
     "ReconciliationListQuery",
+    "ImportPlanRequest",
+    "ImportApplyRequest",
+    "RowErrorOut",
+    "RowPlanOut",
+    "ImportPlanOut",
     "ScreeningOut",
     "ScreeningRecord",
     "ScreeningRequest",
@@ -1178,3 +1183,53 @@ class ReconciliationOut(AtlasResponse):
 class ReconciliationListQuery(ListQuery):
     bank_account_id: str | None = None
     status: ReconciliationStatus | None = None
+
+
+# -------------------------------------------------------------- bulk import
+
+
+class ImportPlanRequest(AtlasRequest):
+    resource: Annotated[str, StringConstraints(max_length=40)]
+    csv: Annotated[str, StringConstraints(min_length=1, max_length=8_000_000)]
+
+
+class ImportApplyRequest(ImportPlanRequest):
+    """Apply, but only if the file still does what the caller was shown.
+
+    The plan is not stored between the two calls, and storing it would be
+    worse: applying a decision taken against a database that has moved since is
+    how an "update" silently becomes a "create". The file is re-planned here
+    and the counts the caller saw are checked against the fresh plan. A
+    mismatch is refused rather than reconciled — something changed underneath,
+    and only a person knows whether that matters.
+    """
+
+    expect_creates: int = Field(ge=0)
+    expect_updates: int = Field(ge=0)
+    expect_unchanged: int = Field(ge=0)
+
+
+class RowErrorOut(AtlasResponse):
+    row: int
+    column: str | None = None
+    message: str
+
+
+class RowPlanOut(AtlasResponse):
+    row: int
+    key: str
+    #: "create", "update", or "unchanged".
+    action: str
+    changes: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImportPlanOut(AtlasResponse):
+    resource: str
+    is_valid: bool
+    creates: int
+    updates: int
+    unchanged: int
+    #: Every problem, not the first. An operator fixing a spreadsheet one error
+    #: per upload gives up before the file is clean.
+    errors: list[RowErrorOut] = Field(default_factory=list)
+    rows: list[RowPlanOut] = Field(default_factory=list)

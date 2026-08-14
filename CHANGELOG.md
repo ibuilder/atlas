@@ -12,6 +12,14 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Bulk import is reachable** (ROADMAP 6.7) at `/admin/imports` and
+  `/api/v1/imports`. The read-only plan step was the whole point of the module
+  and nobody could ask for one. The plan is not stored between plan and apply —
+  apply re-plans the same bytes and refuses if the counts have moved, because
+  applying a decision taken against a database that has changed since is how an
+  "update" quietly becomes a "create". Templates are downloadable per resource,
+  so nobody has to guess the columns.
+
 - **SCIM 2.0 and the SSO login routes** (ROADMAP 6.6). `/scim/v2`, sitting
   deliberately outside `/api/v1`: everything there authenticates as a person,
   and a directory authenticates as an integration presenting a token issued to

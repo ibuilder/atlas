@@ -25,7 +25,7 @@ file have to agree.
 
 | Capability | Status | Notes |
 |---|---|---|
-| Bulk import with replay | **No surface** | Properties, units, and vendors from CSV. The whole file is validated before anything is written, and `plan_import()` reads only - which is the point of it, and nobody can ask for a plan. |
+| Bulk import with replay | **Complete** | `/admin/imports` and `/api/v1/imports`. The plan step is the point and it writes nothing: a CSV of four hundred units is not something anybody can check by reading, so the page shows what would be created, what would be updated and to what, and *every* problem in the file rather than the first — an operator fixing a spreadsheet one error per upload gives up before it is clean. The whole file is validated before anything lands, because a partial import is worse than a failed one: nobody can tell which half landed, and re-uploading duplicates the half that did. The plan is deliberately not stored between the two steps; apply re-plans the same bytes and refuses if the counts have moved, since applying a decision taken against a database that has changed since is how an update quietly becomes a create. Rows are keyed, so a re-upload updates rather than duplicating. |
 | Multi-organization tenancy | **Complete** | Three enforcement layers: service scoping, an ORM guard, and PostgreSQL row-level security applied by migration. A build-failing invariant catches a tenant table that escapes any of them. |
 | RBAC + ABAC authorization | **Complete** | Organization, portfolio, and property scopes; portal ownership predicates; exhaustive test matrix. |
 | Tamper-evident audit trail | **Complete** | Per-organization hash chain, verification endpoint, scheduled integrity check. |
