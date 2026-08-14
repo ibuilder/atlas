@@ -62,8 +62,10 @@ __all__ = [
     "EsignProvider",
     "InternalProvider",
     "SignerInput",
+    "awaiting_signature",
     "create_envelope",
     "decline_envelope",
+    "envelope_for_signer",
     "envelopes_for_subject",
     "expire_envelopes",
     "get_provider",
@@ -237,6 +239,8 @@ def create_envelope(
         )
     session.flush()
 
+    _warn_about_unreachable_signers(session, envelope=envelope)
+
     record_audit_event(
         action=AuditAction.ENVELOPE_CREATED,
         resource_type="SignatureEnvelope",
@@ -255,6 +259,43 @@ def create_envelope(
         session=session,
     )
     return envelope
+
+
+def _warn_about_unreachable_signers(session: Session, *, envelope: SignatureEnvelope) -> None:
+    """Say so when a signer has no account that could reach the document.
+
+    The built-in provider expects the signer to open the document in their own
+    portal, and ``awaiting_signature`` matches strictly on the signed-in
+    address. An envelope addressed to somebody's *contact* email rather than
+    their login is therefore invisible to them - which looks, from the office,
+    exactly like a signer who is ignoring it.
+
+    A warning rather than a refusal: an external party with no account at all is
+    a legitimate signer, and refusing would make that case impossible.
+    """
+    from app.models.iam import User
+
+    addresses = [signer.email for signer in envelope.signers]
+    if not addresses:
+        return
+
+    known = {
+        row
+        for row in session.execute(
+            select(User.email).where(User.org_id == envelope.org_id, User.email.in_(addresses))
+        ).scalars()
+    }
+    unreachable = [address for address in addresses if address.lower() not in known]
+    if unreachable:
+        log.warning(
+            "envelope names signers with no account on this organization",
+            extra={
+                "event": "esign.signer_without_account",
+                "envelope_id": envelope.id,
+                "reference": envelope.reference,
+                "signers": unreachable,
+            },
+        )
 
 
 def send_envelope(
@@ -577,6 +618,68 @@ def expire_envelopes(session: Session, *, org_id: str) -> int:
     if stale:
         session.flush()
     return len(stale)
+
+
+def awaiting_signature(session: Session, *, org_id: str, email: str) -> list[SignatureEnvelope]:
+    """Envelopes this person still has to sign.
+
+    Keyed on the address named on the envelope, and the caller is expected to
+    pass the *signed-in user's* address rather than one from a request. A
+    signer is authorised by being named on the envelope - which is a fact about
+    the envelope, not a permission anybody can be granted - so the identity has
+    to come from the session or the check means nothing.
+    """
+    address = (email or "").strip().lower()
+    if not address:
+        return []
+
+    # Matched strictly against the address on the envelope. Deliberately not
+    # widened to a resident's or vendor's *contact* address: households share
+    # those, and two people who share one must not be able to sign each other's
+    # documents. The consequence is a constraint on whoever raises the envelope
+    # - address it to the address the signer signs in with - which
+    # ``create_envelope`` warns about when it can see that nobody holds it.
+
+    return list(
+        session.execute(
+            select(SignatureEnvelope)
+            .join(EnvelopeSigner, EnvelopeSigner.envelope_id == SignatureEnvelope.id)
+            .where(
+                SignatureEnvelope.org_id == org_id,
+                SignatureEnvelope.deleted_at.is_(None),
+                SignatureEnvelope.status.in_(
+                    [EnvelopeStatus.SENT, EnvelopeStatus.PARTIALLY_SIGNED]
+                ),
+                EnvelopeSigner.email == address,
+                EnvelopeSigner.status == SignerStatus.PENDING,
+            )
+            .order_by(SignatureEnvelope.sent_at.desc().nulls_last())
+        )
+        .scalars()
+        .unique()
+        .all()
+    )
+
+
+def envelope_for_signer(
+    session: Session, *, org_id: str, envelope_id: str, email: str
+) -> SignatureEnvelope:
+    """One envelope, if this person is a party to it. 404 otherwise.
+
+    Not found rather than forbidden: telling somebody an envelope exists but is
+    not theirs turns the portal into a way to enumerate who is signing what.
+    """
+    address = (email or "").strip().lower()
+    envelope = session.execute(
+        select(SignatureEnvelope).where(
+            SignatureEnvelope.id == envelope_id,
+            SignatureEnvelope.org_id == org_id,
+            SignatureEnvelope.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+    if envelope is None or not any(signer.email == address for signer in envelope.signers):
+        raise NotFound("That document was not found.")
+    return envelope
 
 
 def envelopes_for_subject(

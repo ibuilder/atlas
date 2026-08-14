@@ -396,6 +396,37 @@ def generate_owner_statements(
     return {"statements": produced, "period": f"{start} to {end}"}
 
 
+@celery_app.task(name="atlas.esign.expire_envelopes")
+def expire_signature_envelopes() -> dict:
+    """Lapse envelopes nobody completed.
+
+    The module has always had an expiry date on every envelope; without this
+    nothing ever acted on it, so an envelope left open was a document somebody
+    could still sign a year later against terms that had moved on.
+
+    Idempotent: an envelope already expired is not touched.
+    """
+    from app.services.documents.esign import expire_envelopes
+
+    session = _session()
+    expired = 0
+
+    for organization in _organizations():
+        with use_context(system_context("task", org_id=organization.id)):
+            try:
+                expired += expire_envelopes(session, org_id=organization.id)
+                session.commit()
+            except Exception:  # noqa: BLE001 - one tenant must not stop the sweep
+                session.rollback()
+                log.exception(
+                    "envelope expiry failed for an organization",
+                    extra={"event": "esign.sweep_failed", "org_id": organization.id},
+                )
+
+    JOB_RUNS.labels("expire_signature_envelopes", "success").inc()
+    return {"expired": expired}
+
+
 @celery_app.task(name="atlas.approvals.expire_stale")
 def expire_stale_approvals() -> dict:
     """Lapse approvals nobody decided.

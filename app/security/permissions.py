@@ -140,6 +140,10 @@ class Perm:
     DOCUMENT_UPLOAD = "document.upload"
     DOCUMENT_DELETE = "document.delete"
     DOCUMENT_SHARE = "document.share"
+    #: Raising and withdrawing envelopes. Signing needs no permission - a signer
+    #: is authorised by being named on the envelope, which is a fact about the
+    #: envelope rather than a grant somebody can be given.
+    ESIGN_MANAGE = "esign.manage"
 
     # -- assets -----------------------------------------------------------
     ASSET_READ = "asset.read"
@@ -304,6 +308,7 @@ PERMISSION_CATALOG: Final[tuple[PermissionDef, ...]] = (
     _p(Perm.DOCUMENT_UPLOAD, "Upload documents", "Documents"),
     _p(Perm.DOCUMENT_DELETE, "Delete documents", "Documents", sensitive=True),
     _p(Perm.DOCUMENT_SHARE, "Share documents externally", "Documents", sensitive=True),
+    _p(Perm.ESIGN_MANAGE, "Send documents for signature", "Documents", sensitive=True),
     # assets
     _p(Perm.ASSET_READ, "View assets", "Assets"),
     _p(Perm.ASSET_MANAGE, "Manage assets", "Assets"),
@@ -391,6 +396,7 @@ _LEASING_OPERATIONS = frozenset(
         Perm.MESSAGE_SEND,
         Perm.DOCUMENT_READ,
         Perm.DOCUMENT_UPLOAD,
+        Perm.ESIGN_MANAGE,
         Perm.PROPERTY_READ,
         Perm.UNIT_READ,
         Perm.UNIT_MANAGE,

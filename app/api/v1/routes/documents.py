@@ -21,11 +21,27 @@ from app.api.v1 import api_v1_bp
 from app.errors import NotFound, ValidationFailed
 from app.extensions import current_session, db
 from app.middleware import require_org_scope
-from app.models.documents import Document, DocumentCategory, DocumentLink, DocumentVisibility
-from app.schemas.operations import DocumentLinkCreate, DocumentListQuery, DocumentOut
+from app.models.documents import (
+    Document,
+    DocumentCategory,
+    DocumentLink,
+    DocumentVisibility,
+    SignatureEnvelope,
+)
+from app.schemas.operations import (
+    DocumentLinkCreate,
+    DocumentListQuery,
+    DocumentOut,
+    EnvelopeCreate,
+    EnvelopeListQuery,
+    EnvelopeOut,
+    EnvelopeSignerOut,
+    EnvelopeVoid,
+)
 from app.security.permissions import Perm
 from app.security.policies import require
 from app.services.common.unit_of_work import transaction
+from app.services.documents import esign
 from app.services.documents import service as documents
 
 __all__ = []
@@ -236,3 +252,120 @@ def _organization(org_id: str):  # noqa: ANN202
     from app.models.org import Organization
 
     return db.session.get(Organization, org_id)
+
+
+# ------------------------------------------------------------------- e-sign
+#
+# Raising and withdrawing envelopes is staff work behind ESIGN_MANAGE. Signing
+# is not here: a signer is authorised by being named on the envelope, and that
+# happens in their own portal where the consent wording is shown.
+
+
+@api_v1_bp.get("/envelopes", endpoint="envelopes_list")
+def list_envelopes() -> Response:
+    """Envelopes, newest first, optionally by subject or status."""
+    require(Perm.DOCUMENT_READ)
+    org_id = require_org_scope()
+
+    query = parse_query(EnvelopeListQuery)
+
+    stmt = select(SignatureEnvelope).where(
+        SignatureEnvelope.org_id == org_id, SignatureEnvelope.deleted_at.is_(None)
+    )
+    if query.status:
+        stmt = stmt.where(SignatureEnvelope.status == query.status)
+    if query.subject_type and query.subject_id:
+        stmt = stmt.where(
+            SignatureEnvelope.subject_type == query.subject_type,
+            SignatureEnvelope.subject_id == query.subject_id,
+        )
+
+    page = paginate(
+        current_session(), stmt, SignatureEnvelope, limit=query.limit, cursor=query.cursor
+    )
+    return respond_collection(page, EnvelopeOut)
+
+
+@api_v1_bp.get("/envelopes/<id:envelope_id>", endpoint="envelopes_get")
+def get_envelope(envelope_id: str) -> Response:
+    """One envelope with its parties and their consent records."""
+    require(Perm.DOCUMENT_READ)
+    org_id = require_org_scope()
+
+    record = db.session.get(SignatureEnvelope, envelope_id)
+    if record is None or record.org_id != org_id or record.deleted_at is not None:
+        raise NotFound("That envelope was not found.")
+
+    return respond(
+        {
+            **EnvelopeOut.model_validate(record, from_attributes=True).model_dump(mode="json"),
+            "signers": [
+                EnvelopeSignerOut.model_validate(signer, from_attributes=True).model_dump(
+                    mode="json"
+                )
+                for signer in record.signers
+            ],
+        }
+    )
+
+
+@api_v1_bp.post("/envelopes", endpoint="envelopes_create")
+def create_signature_envelope() -> Response:
+    """Draft an envelope. Nothing is delivered until it is sent."""
+    require(Perm.ESIGN_MANAGE)
+    payload = parse_body(EnvelopeCreate)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = esign.create_envelope(
+            session,
+            org_id=org_id,
+            document_id=payload.document_id,
+            title=payload.title,
+            reference=payload.reference,
+            signers=[
+                esign.SignerInput(name=s.name, email=s.email, role=s.role) for s in payload.signers
+            ],
+            subject_type=payload.subject_type,
+            subject_id=payload.subject_id,
+            expires_in_days=payload.expires_in_days,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        EnvelopeOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/envelopes/{record.id}",
+    )
+
+
+@api_v1_bp.post("/envelopes/<id:envelope_id>/send", endpoint="envelopes_send")
+def send_signature_envelope(envelope_id: str) -> Response:
+    """Deliver it, pinning the document being signed."""
+    require(Perm.ESIGN_MANAGE)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = session.get(SignatureEnvelope, envelope_id)
+        if record is None or record.org_id != org_id or record.deleted_at is not None:
+            raise NotFound("That envelope was not found.")
+        esign.send_envelope(session, envelope=record, actor_id=current_user.id)
+
+    return respond(EnvelopeOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/envelopes/<id:envelope_id>/void", endpoint="envelopes_void")
+def void_signature_envelope(envelope_id: str) -> Response:
+    """Withdraw it. A completed envelope cannot be withdrawn."""
+    require(Perm.ESIGN_MANAGE)
+    payload = parse_body(EnvelopeVoid)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = session.get(SignatureEnvelope, envelope_id)
+        if record is None or record.org_id != org_id or record.deleted_at is not None:
+            raise NotFound("That envelope was not found.")
+        esign.void_envelope(
+            session, envelope=record, reason=payload.reason, actor_id=current_user.id
+        )
+
+    return respond(EnvelopeOut.model_validate(record, from_attributes=True))

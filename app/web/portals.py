@@ -36,6 +36,13 @@ from app.models.org import OwnershipStake, Property
 from app.models.resident import MessageDirection, Tenancy
 from app.security.permissions import Perm
 from app.security.policies import require
+from app.services.documents.esign import (
+    DEFAULT_CONSENT,
+    awaiting_signature,
+    decline_envelope,
+    envelope_for_signer,
+    record_signature,
+)
 from app.services.notifications.messaging import (
     Participant,
     mark_read,
@@ -753,3 +760,148 @@ def vendor_message_thread(thread_id: str) -> str:
 @login_required
 def vendor_message_reply(thread_id: str) -> Response:
     return _reply(UserType.VENDOR, thread_id, "vendor.message_thread")
+
+
+# ---------------------------------------------------------------------------
+# Signing
+#
+# A signer is authorised by being *named on the envelope*, which is a fact
+# about the envelope rather than a permission anyone can be granted - so the
+# identity is taken from the signed-in account and never from the request. This
+# is also where the consent wording is actually shown, which is what makes the
+# stored consent record mean anything.
+# ---------------------------------------------------------------------------
+
+
+def _signature_list(expected: UserType) -> str:
+    _require_user_type(expected)
+    org_id = require_org_scope()
+
+    return render_template(
+        "portals/signatures.html",
+        envelopes=awaiting_signature(current_session(), org_id=org_id, email=current_user.email),
+        home_endpoint=_portal_home(),
+    )
+
+
+def _signature_detail(expected: UserType, envelope_id: str) -> str:
+    _require_user_type(expected)
+    org_id = require_org_scope()
+
+    envelope = envelope_for_signer(
+        current_session(),
+        org_id=org_id,
+        envelope_id=envelope_id,
+        email=current_user.email,
+    )
+    me = next((s for s in envelope.signers if s.email == (current_user.email or "").lower()), None)
+    return render_template(
+        "portals/signature.html",
+        envelope=envelope,
+        me=me,
+        consent=DEFAULT_CONSENT,
+        home_endpoint=_portal_home(),
+    )
+
+
+def _sign(expected: UserType, envelope_id: str, endpoint: str) -> Response:
+    _require_user_type(expected)
+    org_id = require_org_scope()
+
+    envelope = envelope_for_signer(
+        current_session(),
+        org_id=org_id,
+        envelope_id=envelope_id,
+        email=current_user.email,
+    )
+    action = (request.form.get("action") or "").strip().lower()
+    back = redirect(url_for(endpoint, envelope_id=envelope_id))
+
+    try:
+        if action == "sign":
+            record_signature(
+                current_session(),
+                envelope=envelope,
+                email=current_user.email,
+                typed_name=request.form.get("typed_name") or "",
+                # The consent evidence. Captured here because it cannot be
+                # reconstructed afterwards, which is the whole point of it.
+                ip_address=request.remote_addr,
+                user_agent=request.headers.get("User-Agent"),
+                consent_text=DEFAULT_CONSENT,
+            )
+            message = "Signed. Thank you."
+        elif action == "decline":
+            decline_envelope(
+                current_session(),
+                envelope=envelope,
+                email=current_user.email,
+                reason=request.form.get("reason") or "",
+            )
+            message = "Recorded. The sender has been notified."
+        else:
+            flash("That is not something you can do to this document.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return redirect(url_for(endpoint.rsplit(".", 1)[0] + ".signatures"))
+
+
+@resident_bp.get("/signatures", endpoint="signatures")
+@login_required
+def resident_signatures() -> str:
+    """Documents waiting for this resident's signature."""
+    return _signature_list(UserType.RESIDENT)
+
+
+@resident_bp.get("/signatures/<id:envelope_id>", endpoint="signature")
+@login_required
+def resident_signature(envelope_id: str) -> str:
+    return _signature_detail(UserType.RESIDENT, envelope_id)
+
+
+@resident_bp.post("/signatures/<id:envelope_id>", endpoint="sign")
+@login_required
+def resident_sign(envelope_id: str) -> Response:
+    return _sign(UserType.RESIDENT, envelope_id, "resident.signature")
+
+
+@owner_bp.get("/signatures", endpoint="signatures")
+@login_required
+def owner_signatures() -> str:
+    return _signature_list(UserType.OWNER)
+
+
+@owner_bp.get("/signatures/<id:envelope_id>", endpoint="signature")
+@login_required
+def owner_signature(envelope_id: str) -> str:
+    return _signature_detail(UserType.OWNER, envelope_id)
+
+
+@owner_bp.post("/signatures/<id:envelope_id>", endpoint="sign")
+@login_required
+def owner_sign(envelope_id: str) -> Response:
+    return _sign(UserType.OWNER, envelope_id, "owner.signature")
+
+
+@vendor_bp.get("/signatures", endpoint="signatures")
+@login_required
+def vendor_signatures() -> str:
+    return _signature_list(UserType.VENDOR)
+
+
+@vendor_bp.get("/signatures/<id:envelope_id>", endpoint="signature")
+@login_required
+def vendor_signature(envelope_id: str) -> str:
+    return _signature_detail(UserType.VENDOR, envelope_id)
+
+
+@vendor_bp.post("/signatures/<id:envelope_id>", endpoint="sign")
+@login_required
+def vendor_sign(envelope_id: str) -> Response:
+    return _sign(UserType.VENDOR, envelope_id, "vendor.signature")

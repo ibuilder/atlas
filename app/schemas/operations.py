@@ -17,7 +17,12 @@ from app.models.accounting import (
     PaymentMethod,
     PaymentStatus,
 )
-from app.models.documents import DocumentCategory, DocumentVisibility
+from app.models.documents import (
+    DocumentCategory,
+    DocumentVisibility,
+    EnvelopeStatus,
+    SignerStatus,
+)
 from app.models.leasing import ApplicationStatus, LeadStatus, LeaseStatus
 from app.models.maintenance import Priority, RequestStatus, WorkOrderStatus
 from app.models.resident import ResidentStatus, TenancyRole
@@ -40,6 +45,12 @@ __all__ = [
     "DepositMovementOut",
     "DepositRelease",
     "DocumentOut",
+    "EnvelopeCreate",
+    "EnvelopeListQuery",
+    "EnvelopeOut",
+    "EnvelopeSignerOut",
+    "EnvelopeVoid",
+    "SignerIn",
     "InvoiceOut",
     "LeadCreate",
     "LeadOut",
@@ -522,3 +533,74 @@ class DocumentListQuery(ListQuery):
     category: DocumentCategory | None = None
     entity_type: str | None = None
     entity_id: str | None = None
+
+
+# ------------------------------------------------------------------- e-sign
+
+
+class EnvelopeListQuery(ListQuery):
+    status: EnvelopeStatus | None = None
+    subject_type: str | None = None
+    subject_id: str | None = None
+
+
+class SignerIn(AtlasRequest):
+    name: ShortText
+    email: Email
+    role: Annotated[str, StringConstraints(max_length=60)] | None = None
+
+
+class EnvelopeCreate(AtlasRequest):
+    document_id: str
+    title: Annotated[str, StringConstraints(min_length=1, max_length=255)]
+    reference: Annotated[str, StringConstraints(min_length=1, max_length=60)]
+    signers: list[SignerIn] = Field(min_length=1, max_length=20)
+    subject_type: Annotated[str, StringConstraints(max_length=40)] | None = None
+    subject_id: str | None = None
+    expires_in_days: int = Field(default=30, ge=1, le=365)
+
+    @model_validator(mode="after")
+    def _subject_needs_both_halves(self) -> EnvelopeCreate:
+        if (self.subject_type is None) != (self.subject_id is None):
+            raise ValueError("a subject needs both a type and an id, or neither")
+        return self
+
+
+class EnvelopeVoid(AtlasRequest):
+    #: Mandatory. An envelope withdrawn without a stated reason is one nobody
+    #: can account for afterwards.
+    reason: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+
+
+class EnvelopeSignerOut(AtlasResponse):
+    id: str
+    sequence: int
+    name: str
+    email: str
+    role: str | None = None
+    status: SignerStatus
+    signed_at: dt.datetime | None = None
+    declined_at: dt.datetime | None = None
+    decline_reason: str | None = None
+    #: The consent record. Present because producing it is the point of storing
+    #: it; a signature nobody can evidence is not worth having.
+    typed_name: str | None = None
+    signed_ip: str | None = None
+    consent_text: str | None = None
+
+
+class EnvelopeOut(AtlasResponse):
+    id: str
+    reference: str
+    title: str
+    document_id: str
+    document_sha256: str | None = None
+    subject_type: str | None = None
+    subject_id: str | None = None
+    status: EnvelopeStatus
+    provider: str
+    sent_at: dt.datetime | None = None
+    completed_at: dt.datetime | None = None
+    expires_at: dt.datetime | None = None
+    voided_reason: str | None = None
+    created_at: dt.datetime

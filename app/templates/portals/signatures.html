@@ -1,0 +1,51 @@
+{# Documents waiting for this person's signature.
+
+   Which envelopes appear was decided by `awaiting_signature` from the signed-in
+   account, not from anything in the request. Nothing here filters.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}Signatures · {{ app_name }}{% endblock %}
+{% block heading %}Awaiting your signature{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">To sign</h2>
+    <span class="panel__hint">
+      {{ envelopes | length }} document{{ '' if envelopes | length == 1 else 's' }}
+    </span>
+  </div>
+
+  {% if envelopes %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Document</th><th>Sent</th><th>Signature needed by</th></tr>
+        </thead>
+        <tbody>
+          {% for envelope in envelopes %}
+            <tr>
+              <td>
+                <a href="{{ url_for(request.blueprint ~ '.signature', envelope_id=envelope.id) }}">
+                  {{ envelope.title }}
+                </a>
+              </td>
+              <td class="tiny muted">
+                {{ envelope.sent_at.strftime('%Y-%m-%d') if envelope.sent_at else '—' }}
+              </td>
+              <td class="tiny">
+                {{ envelope.expires_at.strftime('%Y-%m-%d') if envelope.expires_at else '—' }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nothing is waiting for your signature.</p>
+  {% endif %}
+</div>
+
+<p class="tiny"><a href="{{ url_for(home_endpoint) }}">Back to your portal</a></p>
+{% endblock %}

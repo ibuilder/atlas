@@ -108,6 +108,12 @@ BEAT_SCHEDULE: dict[str, dict] = {
         "task": "atlas.approvals.expire_stale",
         "schedule": crontab(minute="*/30"),
     },
+    "expire-signature-envelopes": {
+        # Hourly is ample: the consequence of an hour's lag is an envelope that
+        # could still be signed an hour past its date, not a lost one.
+        "task": "atlas.esign.expire_envelopes",
+        "schedule": crontab(minute="7"),
+    },
     "run-due-report-schedules": {
         # Every quarter hour; the schedule's own cron decides what is actually due.
         "task": "atlas.reports.run_due_schedules",

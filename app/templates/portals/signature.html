@@ -1,0 +1,101 @@
+{# One document, and the act of signing it.
+
+   The consent wording is displayed here, immediately above the field. That is
+   not decoration: the consent record stored with the signature is only evidence
+   if the signer was actually shown the words it records, and this page is the
+   only place that happens.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% block title %}{{ envelope.title }} · {{ app_name }}{% endblock %}
+{% block heading %}{{ envelope.title }}{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Parties</h2>
+    <span class="panel__hint">{{ envelope.status | humanize }}</span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>Name</th><th>Role</th><th>Status</th><th>Signed</th></tr>
+      </thead>
+      <tbody>
+        {% for signer in envelope.signers %}
+          <tr>
+            <td>{{ signer.name }}</td>
+            <td class="tiny muted">{{ signer.role | humanize if signer.role else '—' }}</td>
+            <td class="tiny">{{ signer.status | humanize }}</td>
+            <td class="tiny muted">
+              {{ signer.signed_at.strftime('%Y-%m-%d %H:%M') if signer.signed_at else '—' }}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if me and me.status.value == 'pending' %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Sign</h2>
+    <span class="panel__hint">
+      Your name, the time, and the address you sign from are recorded
+    </span>
+  </div>
+
+  <form method="post"
+        action="{{ url_for(request.blueprint ~ '.sign', envelope_id=envelope.id) }}"
+        class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    {# Shown, then stored with the signature. One without the other is not
+       consent to anything. #}
+    <p class="consent">{{ consent }}</p>
+
+    <label for="typed_name">Type your full name</label>
+    <input type="text" id="typed_name" name="typed_name" maxlength="150"
+           autocomplete="off" required>
+    <button type="submit" name="action" value="sign" class="btn">
+      Sign this document
+    </button>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Or decline</h2>
+    <span class="panel__hint">This ends the document for every party</span>
+  </div>
+  <form method="post"
+        action="{{ url_for(request.blueprint ~ '.sign', envelope_id=envelope.id) }}"
+        class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="reason">Reason</label>
+    <input type="text" id="reason" name="reason" maxlength="255" required>
+    <button type="submit" name="action" value="decline" class="btn btn--quiet">
+      Decline to sign
+    </button>
+  </form>
+</div>
+{% elif me and me.status.value == 'signed' %}
+  <p class="tiny muted">
+    You signed this on {{ me.signed_at.strftime('%Y-%m-%d at %H:%M') }} as
+    &ldquo;{{ me.typed_name }}&rdquo;.
+    {% if envelope.outstanding_signers %}
+      It is waiting on {{ envelope.outstanding_signers | length }} other
+      signature{{ '' if envelope.outstanding_signers | length == 1 else 's' }}.
+    {% endif %}
+  </p>
+{% elif me %}
+  <p class="tiny muted">You declined this document.</p>
+{% endif %}
+
+<p class="tiny">
+  <a href="{{ url_for(request.blueprint ~ '.signatures') }}">All documents</a>
+  · <a href="{{ url_for(home_endpoint) }}">Back to your portal</a>
+</p>
+{% endblock %}

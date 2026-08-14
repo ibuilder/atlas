@@ -373,7 +373,6 @@ def _seed_inspection(organization, prop, units, leases) -> int:  # noqa: ANN001
 
     raise_work_orders_from_findings(current_session(), inspection=inspection)
     complete_inspection(current_session(), inspection=inspection, inspector_signed=True)
-    db.session.flush()
     return 1
 
 
@@ -1000,6 +999,7 @@ def _seed_esign(organization, leases, users) -> int:  # noqa: ANN001
     from sqlalchemy import select
 
     from app.models.documents import Document, DocumentCategory, ScanStatus
+    from app.models.iam import User
     from app.models.resident import Resident, Tenancy
     from app.services.documents.esign import (
         SignerInput,
@@ -1020,7 +1020,22 @@ def _seed_esign(organization, leases, users) -> int:  # noqa: ANN001
     if tenancy is None:
         return 0
     resident = db.session.get(Resident, tenancy.resident_id)
-    if resident is None or not resident.email:
+    if resident is None:
+        return 0
+
+    # The address the resident *signs in with*, not the contact address on their
+    # record. `awaiting_signature` matches strictly on the signed-in address, so
+    # an envelope addressed anywhere else is invisible to them - which is the
+    # constraint the service warns about, and the demo should not walk into it.
+    portal_user = (
+        db.session.execute(
+            select(User).where(User.org_id == organization.id, User.resident_id == resident.id)
+        )
+        .scalars()
+        .first()
+    )
+    signer_email = portal_user.email if portal_user is not None else resident.email
+    if not signer_email:
         return 0
 
     # A stand-in for the rendered agreement. The digest is of real bytes, so the
@@ -1054,7 +1069,7 @@ def _seed_esign(organization, leases, users) -> int:  # noqa: ANN001
         title=f"Lease agreement {lease.lease_number}",
         reference=f"ENV-{lease.lease_number}",
         signers=[
-            SignerInput(name=resident.full_name, email=resident.email, role="resident"),
+            SignerInput(name=resident.full_name, email=signer_email, role="resident"),
             SignerInput(name=manager.full_name, email=manager.email, role="landlord"),
         ],
         subject_type="lease",
@@ -1064,7 +1079,7 @@ def _seed_esign(organization, leases, users) -> int:  # noqa: ANN001
     send_envelope(current_session(), envelope=envelope, actor_id=manager.id)
 
     for name, address in (
-        (resident.full_name, resident.email),
+        (resident.full_name, signer_email),
         (manager.full_name, manager.email),
     ):
         record_signature(
@@ -1076,5 +1091,38 @@ def _seed_esign(organization, leases, users) -> int:  # noqa: ANN001
             user_agent="Mozilla/5.0 (demo portal)",
         )
 
+    # And one still waiting, so the signing page has something on it. Without
+    # this the demo shows a completed envelope and an empty portal, which
+    # demonstrates the record but not the act.
+    pending_body = (
+        f"PARKING ADDENDUM\nLease {lease.lease_number}\nBay 14, from next month\n"
+    ).encode()
+    pending_document = Document(
+        org_id=organization.id,
+        name=f"Parking addendum {lease.lease_number}",
+        original_filename=f"{lease.lease_number}-parking.txt",
+        storage_key=f"documents/demo/{lease.lease_number}-parking.txt",
+        content_type="text/plain",
+        size_bytes=len(pending_body),
+        checksum_sha256=sha256_of(pending_body),
+        category=DocumentCategory.LEASE,
+        scan_status=ScanStatus.CLEAN,
+    )
+    db.session.add(pending_document)
     db.session.flush()
-    return 1
+
+    pending = create_envelope(
+        current_session(),
+        org_id=organization.id,
+        document_id=pending_document.id,
+        title=f"Parking addendum {lease.lease_number}",
+        reference=f"ENV-{lease.lease_number}-PARK",
+        signers=[SignerInput(name=resident.full_name, email=signer_email, role="resident")],
+        subject_type="lease",
+        subject_id=lease.id,
+        actor_id=manager.id,
+    )
+    send_envelope(current_session(), envelope=pending, actor_id=manager.id)
+
+    db.session.flush()
+    return 2

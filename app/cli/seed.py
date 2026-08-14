@@ -109,7 +109,10 @@ def seed_demo(slug: str, force: bool) -> None:
         "invisible in the portal)"
     )
     click.echo(f"  Turns        : {operations['turns']} (one finished, one running late)")
-    click.echo(f"  E-signature  : {operations['envelopes']} lease executed by every party")
+    click.echo(
+        f"  E-signature  : {operations['envelopes']} envelopes - one executed, "
+        "one waiting in the resident portal"
+    )
     _print_credentials(slug)
 
 

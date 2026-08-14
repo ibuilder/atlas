@@ -84,4 +84,8 @@
     <p class="empty">No work is currently assigned to you.</p>
   {% endif %}
 </div>
+<nav class="portal-links">
+  <a href="{{ url_for('vendor.messages') }}">Messages</a>
+  <a href="{{ url_for('vendor.signatures') }}">Documents to sign</a>
+</nav>
 {% endblock %}
