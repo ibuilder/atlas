@@ -1,0 +1,161 @@
+{# One lease, and the two conversations that end it.
+
+   The deposit shown is what was actually collected, taken from the subledger,
+   not the figure in the contract. Where a deposit was waived, part-paid, or
+   replaced by a rider those are different numbers, and settling against the
+   contracted one refunds money that was never taken.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ lease.lease_number }} · {{ app_name }}{% endblock %}
+{% block heading %}Lease {{ lease.lease_number }}{% endblock %}
+{% block nav %}{{ admin_nav('leases') }}{% endblock %}
+
+{% block topbar_meta %}
+<span class="integrity"><span class="integrity__dot"></span>
+  {{ lease.status | humanize }}</span>
+{% if lease.end_date %}
+  <span class="tiny muted">ends {{ lease.end_date.isoformat() }}</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ unit.unit_number if unit else 'No unit' }}</h2>
+    <span class="panel__hint">
+      {{ lease.start_date.isoformat() }}
+      {%- if lease.end_date %} to {{ lease.end_date.isoformat() }}{% endif %}
+      · {{ lease.rent_amount | money }} rent
+    </span>
+  </div>
+  <p class="tiny">
+    <strong>{{ held | money }}</strong> held in trust
+    {%- if lease.security_deposit is not none and lease.security_deposit != held %}
+      <span class="muted">
+        (the lease says {{ lease.security_deposit | money }}; the disposition
+        settles against what was collected)
+      </span>
+    {%- endif %}
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Renewals</h2>
+    <span class="panel__hint">{{ renewals | length }}</span>
+  </div>
+
+  {% if renewals %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Status</th><th class="num">Offered rent</th><th>Term</th>
+              <th>Expires</th><th>Answered</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for renewal in renewals %}
+            <tr>
+              <td class="tiny">{{ renewal.status | humanize }}</td>
+              <td class="num">{{ renewal.offered_rent | money }}</td>
+              <td class="tiny muted">
+                {{ renewal.proposed_start.isoformat() }} → {{ renewal.proposed_end.isoformat() }}
+              </td>
+              <td class="tiny muted">
+                {% if renewal.offer_expires_at %}
+                  {{ renewal.offer_expires_at.date().isoformat() }}
+                  {%- if renewal.status in ('draft', 'offered')
+                        and renewal.offer_expires_at.date() < today %}
+                    <span class="pill pill--critical">lapsed</span>
+                  {%- endif %}
+                {% else %}—{% endif %}
+              </td>
+              <td class="tiny muted">
+                {{ renewal.responded_at.date().isoformat() if renewal.responded_at else '—' }}
+                {%- if renewal.declined_reason %} — {{ renewal.declined_reason }}{% endif %}
+              </td>
+              <td class="tiny">
+                {% if can('lease.renew') and renewal.status in ('draft', 'offered') %}
+                  <form method="post" class="inline-form"
+                        action="{{ url_for('admin.renewal_action', renewal_id=renewal.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" name="action" value="accept" class="btn btn--quiet">
+                      Accept
+                    </button>
+                    <input type="text" name="reason" maxlength="255" placeholder="Why declined">
+                    <button type="submit" name="action" value="decline" class="btn btn--quiet">
+                      Decline
+                    </button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No renewal has been offered.</p>
+  {% endif %}
+
+  {% if can('lease.renew') and lease.status.value in ('active', 'holdover') %}
+    <form method="post"
+          action="{{ url_for('admin.lease_offer_renewal', lease_id=lease.id) }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="offered_rent">Offered rent</label>
+      {# Fixed at this moment. A resident who accepts is accepting this
+         number, not whatever the asking rent has become since. #}
+      <input type="text" id="offered_rent" name="offered_rent" inputmode="decimal" required
+             value="{{ lease.rent_amount }}">
+      <label for="proposed_start">New term starts</label>
+      <input type="date" id="proposed_start" name="proposed_start" required>
+      <label for="proposed_end">New term ends</label>
+      <input type="date" id="proposed_end" name="proposed_end" required>
+      <label for="term_months">Months</label>
+      <input type="number" id="term_months" name="term_months" value="12" min="1" max="120">
+      <label for="expires_in_days">Offer open for, in days</label>
+      <input type="number" id="expires_in_days" name="expires_in_days" value="30" min="1" max="365">
+      <button type="submit" class="btn">Offer renewal</button>
+    </form>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Move-out</h2>
+    <span class="panel__hint">
+      {% if move_out %}{{ move_out.status | humanize }}{% else %}No notice given{% endif %}
+    </span>
+  </div>
+
+  {% if move_out %}
+    <p class="tiny">
+      Notice {{ move_out.notice_given_at.isoformat() if move_out.notice_given_at else '—' }},
+      scheduled {{ move_out.scheduled_date.isoformat() if move_out.scheduled_date else '—' }}.
+      <a href="{{ url_for('admin.move_out_detail', move_out_id=move_out.id) }}">Open it</a>
+    </p>
+  {% elif can('lease.terminate') and lease.status.value in ('active', 'holdover') %}
+    <form method="post"
+          action="{{ url_for('admin.lease_give_notice', lease_id=lease.id) }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="notice_date">Notice given on</label>
+      <input type="date" id="notice_date" name="notice_date" required>
+      <label for="scheduled_date">Leaving on</label>
+      <input type="date" id="scheduled_date" name="scheduled_date" required>
+      <label for="reason">Reason</label>
+      <input type="text" id="reason" name="reason" maxlength="120"
+             placeholder="Relocating for work">
+      <label class="tiny">
+        <input type="checkbox" name="is_early_termination" value="1">
+        Early termination
+      </label>
+      <button type="submit" class="btn">Record notice</button>
+    </form>
+  {% else %}
+    <p class="empty">Nothing to record on a {{ lease.status | humanize | lower }} lease.</p>
+  {% endif %}
+</div>
+
+<p class="tiny"><a href="{{ url_for('admin.leases') }}">Back to leases</a></p>
+{% endblock %}

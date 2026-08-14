@@ -30,9 +30,12 @@ from app.models.leasing import (
     Application,
     Lead,
     Lease,
+    LeaseRenewal,
     LeaseStatus,
+    MoveOut,
     ScreeningResult,
 )
+from app.models.maintenance import Inspection
 from app.models.org import Unit, UnitStatus
 from app.models.resident import Resident, Tenancy, TenancyRole
 from app.models.sequences import SequenceKey
@@ -45,6 +48,7 @@ from app.schemas.operations import (
     ApplicationOut,
     ApplicationWithdraw,
     AssessmentOut,
+    DepositSettlement,
     LeadCreate,
     LeadListQuery,
     LeadOut,
@@ -52,6 +56,13 @@ from app.schemas.operations import (
     LeaseFromApplication,
     LeaseListQuery,
     LeaseOut,
+    MoveOutListQuery,
+    MoveOutOut,
+    MoveOutRecord,
+    NoticeGiven,
+    RenewalDecline,
+    RenewalOffer,
+    RenewalOut,
     ResidentCreate,
     ResidentListQuery,
     ResidentOut,
@@ -64,7 +75,7 @@ from app.security.policies import filter_permitted, require
 from app.services.audit.recorder import record_audit_event
 from app.services.common.numbering import next_number
 from app.services.common.unit_of_work import transaction
-from app.services.leasing import applications
+from app.services.leasing import applications, tenancy
 
 __all__ = []
 
@@ -593,3 +604,248 @@ def convert_application(application_id: str) -> Response:
         LeaseOut.model_validate(lease, from_attributes=True),
         location=f"/api/v1/leases/{lease.id}",
     )
+
+
+# ------------------------------------------------- renewals and move-outs
+#
+# The end of a tenancy is the most litigated thing a management company does,
+# and two rules here exist because of that:
+#
+# The statutory disposition clock starts when the move-out is *recorded*, and
+# the deadline is stored on the record rather than recomputed on read. A
+# recomputed deadline drifts every time somebody changes the setting; a stored
+# one is the date the law will be measured against.
+#
+# Deductions are preferably taken from a completed inspection rather than typed
+# into the settlement request. A finding photographed on a checklist the
+# resident could see is the defensible kind; a figure invented at settlement
+# time is what a magistrate disallows.
+
+
+def _lease_or_404(lease_id: str, org_id: str) -> Lease:
+    record = db.session.get(Lease, lease_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That lease was not found.")
+    return record
+
+
+def _move_out_or_404(move_out_id: str, org_id: str) -> MoveOut:
+    record = db.session.get(MoveOut, move_out_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That move-out was not found.")
+    return record
+
+
+@api_v1_bp.post("/leases/<id:lease_id>/renewals", endpoint="renewals_offer")
+def offer_renewal(lease_id: str) -> Response:
+    """Offer terms for the next term. The terms are fixed at this moment."""
+    require(Perm.LEASE_RENEW)
+    payload = parse_body(RenewalOffer)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        lease = _lease_or_404(lease_id, org_id)
+        record = tenancy.offer_renewal(
+            session,
+            lease=lease,
+            offered_rent=payload.offered_rent,
+            proposed_start=payload.proposed_start,
+            proposed_end=payload.proposed_end,
+            term_months=payload.term_months,
+            expires_in_days=payload.expires_in_days,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        RenewalOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/leases/{lease_id}/renewals",
+    )
+
+
+@api_v1_bp.get("/leases/<id:lease_id>/renewals", endpoint="renewals_list")
+def list_renewals(lease_id: str) -> Response:
+    require(Perm.LEASE_READ)
+    org_id = require_org_scope()
+    _lease_or_404(lease_id, org_id)
+
+    records = list(
+        db.session.execute(
+            select(LeaseRenewal)
+            .where(LeaseRenewal.org_id == org_id, LeaseRenewal.lease_id == lease_id)
+            .order_by(LeaseRenewal.created_at.desc())
+        ).scalars()
+    )
+    return respond(
+        {
+            "data": [
+                RenewalOut.model_validate(r, from_attributes=True).model_dump(mode="json")
+                for r in records
+            ]
+        }
+    )
+
+
+@api_v1_bp.post("/renewals/<id:renewal_id>/accept", endpoint="renewals_accept")
+def accept_renewal(renewal_id: str) -> Response:
+    """Accept an offer, creating the new lease on the offered terms.
+
+    Refused once the offer has lapsed. Honouring a lapsed price is a decision
+    somebody should make deliberately by making a new offer.
+    """
+    require(Perm.LEASE_RENEW)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        renewal = session.get(LeaseRenewal, renewal_id)
+        if renewal is None or renewal.org_id != org_id:
+            raise NotFound("That renewal was not found.")
+        lease = tenancy.accept_renewal(session, renewal=renewal, actor_id=current_user.id)
+
+    return respond_created(
+        LeaseOut.model_validate(lease, from_attributes=True),
+        location=f"/api/v1/leases/{lease.id}",
+    )
+
+
+@api_v1_bp.post("/renewals/<id:renewal_id>/decline", endpoint="renewals_decline")
+def decline_renewal(renewal_id: str) -> Response:
+    require(Perm.LEASE_RENEW)
+    payload = parse_body(RenewalDecline)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        renewal = session.get(LeaseRenewal, renewal_id)
+        if renewal is None or renewal.org_id != org_id:
+            raise NotFound("That renewal was not found.")
+        record = tenancy.decline_renewal(session, renewal=renewal, reason=payload.reason)
+
+    return respond(RenewalOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/leases/<id:lease_id>/notice", endpoint="move_outs_notice")
+def give_notice(lease_id: str) -> Response:
+    """Record that a resident is leaving.
+
+    The deposit figure captured here is what was actually collected, not what
+    the lease says. Settling against the contracted amount refunds money that
+    was never taken.
+    """
+    require(Perm.LEASE_TERMINATE)
+    payload = parse_body(NoticeGiven)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        lease = _lease_or_404(lease_id, org_id)
+        record = tenancy.give_notice(
+            session,
+            lease=lease,
+            notice_date=payload.notice_date,
+            scheduled_date=payload.scheduled_date,
+            reason=payload.reason,
+            is_early_termination=payload.is_early_termination,
+        )
+
+    return respond_created(
+        MoveOutOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/move-outs/{record.id}",
+    )
+
+
+@api_v1_bp.get("/move-outs", endpoint="move_outs_list")
+def list_move_outs() -> Response:
+    """Every move-out, or only those whose statutory deadline has passed."""
+    require(Perm.LEASE_READ)
+    query = parse_query(MoveOutListQuery)
+    org_id = require_org_scope()
+
+    if query.overdue:
+        # Deliberately not a filter on the general list: this is the report
+        # somebody should be looking at every morning, and it has to mean
+        # exactly what the service means by it.
+        records = tenancy.overdue_dispositions(current_session(), org_id=org_id)
+        return respond(
+            {
+                "data": [
+                    MoveOutOut.model_validate(r, from_attributes=True).model_dump(mode="json")
+                    for r in records
+                ]
+            }
+        )
+
+    stmt = select(MoveOut).where(MoveOut.org_id == org_id)
+    if query.status:
+        stmt = stmt.where(MoveOut.status == query.status)
+    page = paginate(current_session(), stmt, MoveOut, limit=query.limit, cursor=query.cursor)
+    return respond_collection(page, MoveOutOut)
+
+
+@api_v1_bp.get("/move-outs/<id:move_out_id>", endpoint="move_outs_get")
+def get_move_out(move_out_id: str) -> Response:
+    require(Perm.LEASE_READ)
+    org_id = require_org_scope()
+    return respond(
+        MoveOutOut.model_validate(_move_out_or_404(move_out_id, org_id), from_attributes=True)
+    )
+
+
+@api_v1_bp.post("/move-outs/<id:move_out_id>/record", endpoint="move_outs_record")
+def record_move_out(move_out_id: str) -> Response:
+    """They actually left. This starts the statutory clock."""
+    require(Perm.LEASE_TERMINATE)
+    payload = parse_body(MoveOutRecord)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        move_out = _move_out_or_404(move_out_id, org_id)
+        record = tenancy.record_move_out(
+            session,
+            move_out=move_out,
+            actual_date=payload.actual_date,
+            forwarding_address=payload.forwarding_address,
+            disposition_days=payload.disposition_days,
+            inspection_id=payload.inspection_id,
+            start_turn_on_vacancy=payload.start_turn_on_vacancy,
+            actor_id=current_user.id,
+        )
+
+    return respond(MoveOutOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/move-outs/<id:move_out_id>/disposition", endpoint="move_outs_settle")
+def settle_deposit(move_out_id: str) -> Response:
+    """Account for the deposit: what is withheld, what is returned, and why.
+
+    Refuses to withhold more than was collected — withholding beyond the
+    deposit is a claim against the resident, not a disposition, and wants to be
+    raised as one.
+    """
+    require(Perm.DEPOSIT_RELEASE)
+    payload = parse_body(DepositSettlement)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        move_out = _move_out_or_404(move_out_id, org_id)
+        if payload.from_inspection_id:
+            inspection = session.get(Inspection, payload.from_inspection_id)
+            if inspection is None or inspection.org_id != org_id:
+                raise NotFound("That inspection was not found.")
+            deductions = tenancy.deductions_from_inspection(
+                session, inspection_id=payload.from_inspection_id
+            )
+        else:
+            deductions = [
+                tenancy.Deduction(
+                    description=item.description,
+                    amount=item.amount,
+                    inspection_item_id=item.inspection_item_id,
+                )
+                for item in payload.deductions
+            ]
+        record = tenancy.settle_deposit(
+            session,
+            move_out=move_out,
+            deductions=deductions,
+            settled_by_id=current_user.id,
+        )
+
+    return respond(MoveOutOut.model_validate(record, from_attributes=True))

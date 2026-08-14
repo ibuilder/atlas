@@ -1,0 +1,117 @@
+{# The disposition board.
+
+   Overdue leads because it is the one number on this page that costs money to
+   ignore: past the statutory deadline the deductions are usually forfeit
+   entirely, and often with a penalty on top.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Move-outs · {{ app_name }}{% endblock %}
+{% block heading %}Move-outs{% endblock %}
+{% block nav %}{{ admin_nav('move_outs') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if overdue %}
+  <span class="integrity integrity--broken">
+    <span class="integrity__dot"></span>
+    {{ overdue | length }} disposition{{ '' if overdue | length == 1 else 's' }} overdue
+  </span>
+{% else %}
+  <span class="integrity"><span class="integrity__dot"></span> Nothing overdue</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if overdue %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Past the statutory deadline</h2>
+    <span class="panel__hint">Deductions are usually forfeit past this date</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>Lease</th><th>Left</th><th>Due by</th>
+            <th class="num">Days late</th><th class="num">Held</th></tr>
+      </thead>
+      <tbody>
+        {% for record in overdue %}
+          {% set lease = leases.get(record.lease_id) %}
+          <tr>
+            <td>
+              <a href="{{ url_for('admin.move_out_detail', move_out_id=record.id) }}">
+                {{ lease.lease_number if lease else record.lease_id }}
+              </a>
+            </td>
+            <td class="tiny">{{ record.actual_date.isoformat() if record.actual_date else '—' }}</td>
+            <td class="tiny">{{ record.disposition_due_by.isoformat() }}</td>
+            <td class="num">
+              <span class="pill pill--critical">
+                {{ (today - record.disposition_due_by).days }}d
+              </span>
+            </td>
+            <td class="num">{{ record.deposit_held | money }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Everything</h2>
+    <span class="panel__hint">{{ move_outs | length }} shown</span>
+  </div>
+
+  {% if move_outs %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Lease</th><th>Status</th><th>Notice</th><th>Scheduled</th>
+            <th>Left</th><th>Due by</th><th class="num">Held</th><th class="num">Withheld</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in move_outs %}
+            {% set lease = leases.get(record.lease_id) %}
+            <tr>
+              <td>
+                <a href="{{ url_for('admin.move_out_detail', move_out_id=record.id) }}">
+                  {{ lease.lease_number if lease else record.lease_id }}
+                </a>
+              </td>
+              <td class="tiny">{{ record.status | humanize }}</td>
+              <td class="tiny muted">
+                {{ record.notice_given_at.isoformat() if record.notice_given_at else '—' }}
+              </td>
+              <td class="tiny muted">
+                {{ record.scheduled_date.isoformat() if record.scheduled_date else '—' }}
+              </td>
+              <td class="tiny muted">
+                {{ record.actual_date.isoformat() if record.actual_date else '—' }}
+              </td>
+              <td class="tiny">
+                {% if record.disposition_sent_at %}
+                  <span class="muted">settled</span>
+                {% elif record.disposition_due_by %}
+                  {{ record.disposition_due_by.isoformat() }}
+                {% else %}—{% endif %}
+              </td>
+              <td class="num">{{ record.deposit_held | money }}</td>
+              <td class="num">
+                {{ record.deposit_deductions | money if record.disposition_sent_at else '—' }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nobody has given notice.</p>
+  {% endif %}
+</div>
+{% endblock %}

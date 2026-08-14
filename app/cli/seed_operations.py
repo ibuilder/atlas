@@ -60,6 +60,7 @@ def seed_operations(organization, properties, units, leases, vendor, users, acco
     summary["turns"] = _seed_turns(organization, units, users)
     summary["envelopes"] = _seed_esign(organization, leases, users)
     summary["applications"] = _seed_applications(organization, properties[0], units, users)
+    summary["tenancy_endings"] = _seed_tenancy_endings(organization, leases, accounts, users)
 
     db.session.flush()
     return summary
@@ -1254,3 +1255,99 @@ def _seed_applications(organization, prop, units, users) -> int:  # noqa: ANN001
 
     db.session.flush()
     return 3
+
+
+def _seed_tenancy_endings(organization, leases, accounts, users) -> int:  # noqa: ANN001
+    """A renewal on offer, and a move-out settled inside its deadline.
+
+    A settled one rather than an overdue one: the board is meant to be empty,
+    and a demo that ships with a statutory breach on it teaches the wrong
+    reflex about what that red banner means.
+    """
+    from sqlalchemy import select
+
+    from app.models.accounting import BankAccount
+    from app.models.leasing import LeaseStatus
+    from app.services.accounting.deposits import collect_deposit, deposit_balance
+    from app.services.leasing.tenancy import (
+        Deduction,
+        give_notice,
+        offer_renewal,
+        record_move_out,
+        settle_deposit,
+    )
+
+    manager = users["property_manager"]
+    session = current_session()
+    active = [
+        lease
+        for lease in leases
+        if lease.org_id == organization.id and lease.status == LeaseStatus.ACTIVE
+    ]
+    if len(active) < 2:
+        return 0
+
+    # One renewal on offer, priced above the current rent and open for 30 days.
+    renewing = active[0]
+    offer_renewal(
+        session,
+        lease=renewing,
+        offered_rent=(renewing.rent_amount * Decimal("1.04")).quantize(Decimal("0.01")),
+        proposed_start=renewing.end_date + dt.timedelta(days=1),
+        proposed_end=renewing.end_date + dt.timedelta(days=366),
+        actor_id=manager.id,
+    )
+
+    # One tenancy ended and settled. The deposit is collected first because a
+    # disposition settles against what was taken, not against the contract.
+    leaving = active[1]
+    trust = (
+        session.execute(
+            select(BankAccount).where(
+                BankAccount.org_id == organization.id, BankAccount.is_trust.is_(True)
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if trust is None:
+        return 1
+
+    if deposit_balance(session, org_id=organization.id, lease_id=leaving.id) <= Decimal("0"):
+        collect_deposit(
+            session,
+            org_id=organization.id,
+            lease_id=leaving.id,
+            bank_account_id=trust.id,
+            amount=leaving.security_deposit or leaving.rent_amount,
+            effective_date=leaving.start_date,
+        )
+
+    left_on = TODAY - dt.timedelta(days=12)
+    move_out = give_notice(
+        session,
+        lease=leaving,
+        notice_date=left_on - dt.timedelta(days=30),
+        scheduled_date=left_on,
+        reason="Bought a house.",
+    )
+    record_move_out(
+        session,
+        move_out=move_out,
+        actual_date=left_on,
+        forwarding_address={"raw": "44 Kestrel Row, Northlight"},
+        start_turn_on_vacancy=False,
+        actor_id=manager.id,
+    )
+    settle_deposit(
+        session,
+        move_out=move_out,
+        deductions=[
+            Deduction(description="Carpet clean, living room", amount=Decimal("145.00")),
+            Deduction(description="Two keys not returned", amount=Decimal("40.00")),
+        ],
+        settled_by_id=manager.id,
+    )
+
+    db.session.flush()
+    return 2

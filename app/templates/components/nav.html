@@ -14,6 +14,12 @@
     <a class="sidebar__link" href="{{ url_for('admin.work_orders') }}"
        {% if active == 'work_orders' %}aria-current="page"{% endif %}>Work orders</a>
   {% endif %}
+  {% if can('lease.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.leases') }}"
+       {% if active == 'leases' %}aria-current="page"{% endif %}>Leases</a>
+    <a class="sidebar__link" href="{{ url_for('admin.move_outs') }}"
+       {% if active == 'move_outs' %}aria-current="page"{% endif %}>Move-outs</a>
+  {% endif %}
   {% if can('application.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.applications') }}"
        {% if active == 'applications' %}aria-current="page"{% endif %}>Applications</a>

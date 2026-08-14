@@ -12,6 +12,19 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **The end of a tenancy is reachable** (ROADMAP 6.2). Renewals, notice,
+  move-out, and deposit disposition, from the console at `/admin/leases` and
+  `/admin/move-outs` and over the API. Three rules the surfaces carry rather
+  than soften: a renewal's terms are fixed when offered and a lapsed offer
+  cannot be accepted; the statutory disposition deadline is *stored* when the
+  move-out is recorded, so it does not drift when somebody later changes the
+  setting; and the disposition settles against what the deposit subledger says
+  was collected, which is a different number from the contracted figure
+  wherever a deposit was waived, part-paid, or replaced by a rider. Withholding
+  more than is held is refused — that is a claim against the resident, not a
+  disposition. The board leads with what is overdue, because past the deadline
+  the deductions are usually forfeit entirely and often with a penalty on top.
+
 - **The leasing funnel is reachable** (ROADMAP 6.1). An application can be
   taken, given applicants, consented, submitted, screened, decided, and turned
   into a lease — from the operations console at `/admin/applications` and from

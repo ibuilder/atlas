@@ -56,10 +56,6 @@ NOT_A_SURFACE = {
 #: them. These are whole capabilities that exist in the codebase and not in the
 #: product.
 NO_SURFACE: dict[str, str] = {
-    "leasing/tenancy": (
-        "Renewals, move-outs, and deposit disposition - the most litigated "
-        "thing a management company does."
-    ),
     "accounting/payables": (
         "Bills: recording, threshold approval routing, and disbursement. "
         "Money going out has no surface; money coming in has three."

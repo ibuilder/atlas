@@ -53,6 +53,15 @@ __all__ = [
     "ApplicationWithdraw",
     "AssessmentOut",
     "LeaseFromApplication",
+    "RenewalOffer",
+    "RenewalDecline",
+    "RenewalOut",
+    "NoticeGiven",
+    "MoveOutRecord",
+    "DeductionIn",
+    "DepositSettlement",
+    "MoveOutOut",
+    "MoveOutListQuery",
     "ScreeningOut",
     "ScreeningRecord",
     "ScreeningRequest",
@@ -727,3 +736,115 @@ class LeaseFromApplication(AtlasRequest):
         if self.end_date <= self.start_date:
             raise ValueError("a lease must end after it starts")
         return self
+
+
+# ------------------------------------------------- renewals and move-outs
+
+
+class RenewalOffer(AtlasRequest):
+    #: The terms are fixed when offered. A resident who accepts is accepting
+    #: *this* offer, not whatever the asking rent has become since.
+    offered_rent: Decimal = Field(ge=0)
+    proposed_start: dt.date
+    proposed_end: dt.date
+    term_months: int = Field(default=12, ge=1, le=120)
+    expires_in_days: int = Field(default=30, ge=1, le=365)
+
+    @model_validator(mode="after")
+    def _dates_make_sense(self) -> RenewalOffer:
+        if self.proposed_end <= self.proposed_start:
+            raise ValueError("a renewal must end after it starts")
+        return self
+
+
+class RenewalDecline(AtlasRequest):
+    reason: Annotated[str, StringConstraints(max_length=255)] | None = None
+
+
+class RenewalOut(AtlasResponse):
+    id: str
+    lease_id: str
+    status: str
+    offered_rent: Decimal
+    offered_term_months: int
+    proposed_start: dt.date
+    proposed_end: dt.date
+    offer_sent_at: dt.datetime | None = None
+    #: A lapsed offer cannot be honoured, so when it lapses is part of it.
+    offer_expires_at: dt.datetime | None = None
+    responded_at: dt.datetime | None = None
+    response: str | None = None
+    declined_reason: str | None = None
+    new_lease_id: str | None = None
+
+
+class NoticeGiven(AtlasRequest):
+    notice_date: dt.date
+    scheduled_date: dt.date
+    reason: Annotated[str, StringConstraints(max_length=120)] | None = None
+    is_early_termination: bool = False
+
+    @model_validator(mode="after")
+    def _order_makes_sense(self) -> NoticeGiven:
+        if self.scheduled_date < self.notice_date:
+            raise ValueError("a move-out cannot be scheduled before notice was given")
+        return self
+
+
+class MoveOutRecord(AtlasRequest):
+    actual_date: dt.date
+    forwarding_address: dict[str, Any] | None = None
+    #: The statutory disposition window. Stored on the move-out rather than
+    #: recomputed on read: a recomputed deadline drifts every time somebody
+    #: changes the setting, and this is the date the law measures against.
+    disposition_days: int = Field(default=21, ge=1, le=365)
+    inspection_id: str | None = None
+    start_turn_on_vacancy: bool = True
+
+
+class DeductionIn(AtlasRequest):
+    description: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=3, max_length=500)
+    ]
+    amount: Decimal = Field(gt=0)
+    inspection_item_id: str | None = None
+
+
+class DepositSettlement(AtlasRequest):
+    #: Empty means a full refund, which is a real and common disposition.
+    deductions: list[DeductionIn] = Field(default_factory=list)
+    #: Take the deductions from a completed inspection instead of the body.
+    #: Findings that were photographed on a checklist the resident can see are
+    #: the defensible kind; a figure typed at settlement time is not.
+    from_inspection_id: str | None = None
+
+    @model_validator(mode="after")
+    def _one_source(self) -> DepositSettlement:
+        if self.deductions and self.from_inspection_id:
+            raise ValueError("give either deductions or an inspection to take them from, not both")
+        return self
+
+
+class MoveOutOut(AtlasResponse):
+    id: str
+    lease_id: str
+    status: str
+    notice_given_at: dt.date | None = None
+    scheduled_date: dt.date | None = None
+    actual_date: dt.date | None = None
+    reason: str | None = None
+    is_early_termination: bool
+    #: What was actually collected, not what the lease specified.
+    deposit_held: Decimal
+    deposit_deductions: Decimal
+    deposit_refunded: Decimal
+    deduction_detail: list[Any] = Field(default_factory=list)
+    disposition_due_by: dt.date | None = None
+    disposition_sent_at: dt.datetime | None = None
+
+
+class MoveOutListQuery(ListQuery):
+    status: Annotated[str, StringConstraints(max_length=20)] | None = None
+    #: Only those whose statutory deadline has passed unsettled. Past this
+    #: date the deductions are usually forfeit, often with a penalty on top.
+    overdue: bool = False

@@ -191,7 +191,7 @@ the reachability list, and its FEATURES row honestly reads **Complete**.
 | # | Item | Size |
 |---|---|---|
 | ~~6.1~~ | ~~Leasing funnel: application, screening, decision, conversion~~ | **Shipped** |
-| 6.2 | Move-outs, renewals, and deposit disposition | L |
+| ~~6.2~~ | ~~Move-outs, renewals, and deposit disposition~~ | **Shipped** |
 | 6.3 | Accounts payable: bills, approval, disbursement | M |
 | 6.4 | Bank reconciliation workspace | M |
 | 6.5 | Inspections: schedule, perform, complete | M |
@@ -217,11 +217,13 @@ integration. A public form is an unauthenticated write surface and wants its own
 rate limiting, abuse handling, and identity story rather than a route bolted
 onto this one.
 
-**6.2** carries the most legal weight of anything on this list. The statutory
-disposition clock starts at the move-out, and today a move-out can only be
-recorded from code — so the deadline that decides whether deductions are
-forfeit depends on somebody running a script. Renewals belong with it because
-they share the same lease-end conversation.
+**6.2 — shipped.** It carried the most legal weight of anything on this list:
+the statutory disposition clock starts at the move-out, and a move-out could
+only be recorded from code — so the deadline that decides whether deductions
+are forfeit depended on somebody running a script. Both the console and the API
+now record it, and the deadline is stored at that moment rather than recomputed
+on read. The disposition board leads with what is overdue. Renewals shipped with
+it because they share the same lease-end conversation.
 
 **6.3** because money coming in has three surfaces and money going out has none.
 Separation of duties is enforced by the service already; the surface has to keep

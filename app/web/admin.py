@@ -390,6 +390,378 @@ def ownership() -> str:
     )
 
 
+@admin_bp.get("/leases")
+@login_required
+def leases() -> str:
+    """Active tenancies, expiring soonest first."""
+    require(Perm.LEASE_READ)
+    org_id = require_org_scope()
+
+    stmt = select(Lease).where(Lease.org_id == org_id)
+    status = (request.args.get("status") or "").strip()
+    if status in {member.value for member in LeaseStatus}:
+        stmt = stmt.where(Lease.status == status)
+    elif not status:
+        stmt = stmt.where(Lease.status.in_([LeaseStatus.ACTIVE, LeaseStatus.HOLDOVER]))
+
+    records = list(db.session.execute(stmt.order_by(Lease.end_date.asc()).limit(200)).scalars())
+    return render_template(
+        "admin/leases.html",
+        leases=records,
+        units=_units_by_id(org_id),
+        status=status,
+        statuses=[member.value for member in LeaseStatus],
+        today=utcnow().date(),
+        # Jinja has no timedelta, and a 90-day horizon computed in the
+        # template would be computed once per row.
+        cutoff=utcnow().date() + dt.timedelta(days=90),
+    )
+
+
+@admin_bp.get("/leases/<id:lease_id>")
+@login_required
+def lease_detail(lease_id: str) -> str:
+    """One lease, its renewal history, and its move-out if it has one."""
+    require(Perm.LEASE_READ)
+    org_id = require_org_scope()
+
+    from app.models.leasing import LeaseRenewal, MoveOut
+
+    lease = _lease_or_404(lease_id, org_id)
+    return render_template(
+        "admin/lease.html",
+        lease=lease,
+        unit=db.session.get(Unit, lease.unit_id) if lease.unit_id else None,
+        renewals=list(
+            db.session.execute(
+                select(LeaseRenewal)
+                .where(LeaseRenewal.org_id == org_id, LeaseRenewal.lease_id == lease_id)
+                .order_by(LeaseRenewal.created_at.desc())
+            ).scalars()
+        ),
+        move_out=db.session.execute(
+            select(MoveOut).where(MoveOut.org_id == org_id, MoveOut.lease_id == lease_id)
+        ).scalar_one_or_none(),
+        # What was actually collected. The lease's own figure is what was
+        # agreed, which is a different number whenever a deposit was waived,
+        # part-paid, or replaced by a rider.
+        held=_deposit_held(org_id, lease_id),
+        today=utcnow().date(),
+    )
+
+
+@admin_bp.post("/leases/<id:lease_id>/renewals")
+@login_required
+def lease_offer_renewal(lease_id: str) -> Response:
+    """Offer terms for the next term. They are fixed at this moment."""
+    require(Perm.LEASE_RENEW)
+    org_id = require_org_scope()
+
+    from app.services.leasing.tenancy import offer_renewal
+
+    lease = _lease_or_404(lease_id, org_id)
+    back = redirect(url_for("admin.lease_detail", lease_id=lease_id))
+    form = request.form
+
+    try:
+        offer_renewal(
+            current_session(),
+            lease=lease,
+            offered_rent=_decimal_or_none(form.get("offered_rent")) or Decimal("0"),
+            proposed_start=dt.date.fromisoformat(form.get("proposed_start") or ""),
+            proposed_end=dt.date.fromisoformat(form.get("proposed_end") or ""),
+            term_months=int(form.get("term_months") or 12),
+            expires_in_days=int(form.get("expires_in_days") or 30),
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date."), "error")
+        return back
+
+    flash("Renewal offered.", "success")
+    return back
+
+
+@admin_bp.post("/renewals/<id:renewal_id>")
+@login_required
+def renewal_action(renewal_id: str) -> Response:
+    """Accept an offer, or decline it.
+
+    Accepting a lapsed offer is refused by the service. Honouring an expired
+    price is a decision somebody should take deliberately, by making a new
+    offer at the price they mean.
+    """
+    require(Perm.LEASE_RENEW)
+    org_id = require_org_scope()
+
+    from app.models.leasing import LeaseRenewal
+    from app.services.leasing.tenancy import accept_renewal, decline_renewal
+
+    renewal = db.session.get(LeaseRenewal, renewal_id)
+    if renewal is None or renewal.org_id != org_id:
+        abort(404)
+    back = redirect(url_for("admin.lease_detail", lease_id=renewal.lease_id))
+    action = (request.form.get("action") or "").strip().lower()
+
+    try:
+        if action == "accept":
+            new_lease = accept_renewal(current_session(), renewal=renewal, actor_id=current_user.id)
+            message = f"Renewed as {new_lease.lease_number}."
+        elif action == "decline":
+            decline_renewal(
+                current_session(), renewal=renewal, reason=request.form.get("reason") or None
+            )
+            message = "Offer declined."
+        else:
+            flash("That is not something you can do to an offer.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back
+
+
+@admin_bp.post("/leases/<id:lease_id>/notice")
+@login_required
+def lease_give_notice(lease_id: str) -> Response:
+    """Record that a resident is leaving."""
+    require(Perm.LEASE_TERMINATE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.tenancy import give_notice
+
+    lease = _lease_or_404(lease_id, org_id)
+    back = redirect(url_for("admin.lease_detail", lease_id=lease_id))
+    form = request.form
+
+    try:
+        give_notice(
+            current_session(),
+            lease=lease,
+            notice_date=dt.date.fromisoformat(form.get("notice_date") or ""),
+            scheduled_date=dt.date.fromisoformat(form.get("scheduled_date") or ""),
+            reason=(form.get("reason") or "").strip() or None,
+            is_early_termination=bool(form.get("is_early_termination")),
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date."), "error")
+        return back
+
+    flash("Notice recorded.", "success")
+    return back
+
+
+@admin_bp.get("/move-outs")
+@login_required
+def move_outs() -> str:
+    """The disposition board.
+
+    Overdue leads, because past that date the deductions are usually forfeit
+    entirely and often with a penalty on top. It is the one number on this
+    page that costs money to ignore.
+    """
+    require(Perm.LEASE_READ)
+    org_id = require_org_scope()
+
+    from app.models.leasing import MoveOut
+    from app.services.leasing.tenancy import overdue_dispositions
+
+    records = list(
+        db.session.execute(
+            select(MoveOut)
+            .where(MoveOut.org_id == org_id)
+            .order_by(MoveOut.scheduled_date.desc().nulls_last())
+            .limit(200)
+        ).scalars()
+    )
+    return render_template(
+        "admin/move_outs.html",
+        move_outs=records,
+        overdue=overdue_dispositions(current_session(), org_id=org_id),
+        leases={lease.id: lease for lease in _leases_by_id(org_id)},
+        today=utcnow().date(),
+    )
+
+
+@admin_bp.get("/move-outs/<id:move_out_id>")
+@login_required
+def move_out_detail(move_out_id: str) -> str:
+    """One move-out, its clock, and its disposition."""
+    require(Perm.LEASE_READ)
+    org_id = require_org_scope()
+
+    record = _move_out_or_404(move_out_id, org_id)
+    lease = db.session.get(Lease, record.lease_id)
+    return render_template(
+        "admin/move_out.html",
+        move_out=record,
+        lease=lease,
+        unit=db.session.get(Unit, lease.unit_id) if lease and lease.unit_id else None,
+        today=utcnow().date(),
+    )
+
+
+@admin_bp.post("/move-outs/<id:move_out_id>/record")
+@login_required
+def move_out_record(move_out_id: str) -> Response:
+    """They actually left. This starts the statutory clock."""
+    require(Perm.LEASE_TERMINATE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.tenancy import record_move_out
+
+    move_out = _move_out_or_404(move_out_id, org_id)
+    back = redirect(url_for("admin.move_out_detail", move_out_id=move_out_id))
+    form = request.form
+
+    try:
+        record_move_out(
+            current_session(),
+            move_out=move_out,
+            actual_date=dt.date.fromisoformat(form.get("actual_date") or ""),
+            forwarding_address=(
+                {"raw": form["forwarding_address"].strip()}
+                if (form.get("forwarding_address") or "").strip()
+                else None
+            ),
+            disposition_days=int(form.get("disposition_days") or 21),
+            inspection_id=(form.get("inspection_id") or "").strip() or None,
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date."), "error")
+        return back
+
+    flash(
+        f"Move-out recorded. The disposition is due by "
+        f"{move_out.disposition_due_by.isoformat() if move_out.disposition_due_by else 'unknown'}.",
+        "success",
+    )
+    return back
+
+
+@admin_bp.post("/move-outs/<id:move_out_id>/disposition")
+@login_required
+def move_out_disposition(move_out_id: str) -> Response:
+    """Settle the deposit: what is withheld, what is returned, and why.
+
+    Deductions come from a completed inspection where there is one. A finding
+    photographed on a checklist the resident could see is the defensible kind;
+    a figure typed at settlement is what a magistrate disallows.
+    """
+    require(Perm.DEPOSIT_RELEASE)
+    org_id = require_org_scope()
+
+    from app.models.maintenance import Inspection
+    from app.services.leasing.tenancy import deductions_from_inspection, settle_deposit
+
+    move_out = _move_out_or_404(move_out_id, org_id)
+    back = redirect(url_for("admin.move_out_detail", move_out_id=move_out_id))
+    form = request.form
+
+    try:
+        inspection_id = (form.get("from_inspection_id") or "").strip()
+        if inspection_id:
+            inspection = db.session.get(Inspection, inspection_id)
+            if inspection is None or inspection.org_id != org_id:
+                abort(404)
+            deductions = deductions_from_inspection(current_session(), inspection_id=inspection_id)
+        else:
+            deductions = _parsed_deductions(form.get("deductions"))
+
+        settle_deposit(
+            current_session(),
+            move_out=move_out,
+            deductions=deductions,
+            settled_by_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not an amount."), "error")
+        return back
+
+    flash(
+        f"Disposition settled: {move_out.deposit_deductions} withheld, "
+        f"{move_out.deposit_refunded} returned.",
+        "success",
+    )
+    return back
+
+
+def _parsed_deductions(raw: str | None) -> list:  # noqa: ANN201 - list[Deduction]
+    """One deduction per line, as ``description | amount``.
+
+    A textarea rather than a repeating form: the number of deductions is not
+    known in advance, and an operator writing them out reads back what they
+    withheld in one place.
+    """
+    from app.services.leasing.tenancy import Deduction
+
+    parsed = []
+    for line in (raw or "").splitlines():
+        if not line.strip():
+            continue
+        description, separator, amount = line.rpartition("|")
+        if not separator:
+            raise ValidationFailed(
+                f"{line.strip()!r} is not a deduction. Write each one as 'description | amount'."
+            )
+        value = _decimal_or_none(amount)
+        if value is None:
+            raise ValidationFailed(f"{amount.strip()!r} is not an amount.")
+        parsed.append(Deduction(description=description.strip(), amount=value))
+    return parsed
+
+
+def _said(exc: Exception, fallback: str) -> str:
+    """A service refusal reads as itself; a stdlib ValueError does not."""
+    return str(exc) if isinstance(exc, AtlasError) else fallback
+
+
+def _lease_or_404(lease_id: str, org_id: str) -> Lease:
+    record = db.session.get(Lease, lease_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    return record
+
+
+def _move_out_or_404(move_out_id: str, org_id: str):  # noqa: ANN202 - MoveOut
+    from app.models.leasing import MoveOut
+
+    record = db.session.get(MoveOut, move_out_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    return record
+
+
+def _deposit_held(org_id: str, lease_id: str) -> Decimal:
+    from app.services.accounting.deposits import deposit_balance
+
+    return deposit_balance(current_session(), org_id=org_id, lease_id=lease_id)
+
+
+def _units_by_id(org_id: str) -> dict[str, Unit]:
+    return {
+        unit.id: unit
+        for unit in db.session.execute(select(Unit).where(Unit.org_id == org_id)).scalars()
+    }
+
+
+def _leases_by_id(org_id: str) -> list[Lease]:
+    return list(db.session.execute(select(Lease).where(Lease.org_id == org_id)).scalars())
+
+
 @admin_bp.get("/applications")
 @login_required
 def applications() -> str:

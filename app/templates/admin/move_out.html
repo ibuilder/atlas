@@ -1,0 +1,159 @@
+{# One move-out, its clock, and its disposition.
+
+   The deadline is shown as a stored date, not a computed one. It was fixed
+   when the move-out was recorded, and it is the date the law measures against
+   no matter what the setting becomes afterwards.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Move-out · {{ app_name }}{% endblock %}
+{% block heading %}
+  Move-out — {{ lease.lease_number if lease else move_out.lease_id }}
+{% endblock %}
+{% block nav %}{{ admin_nav('move_outs') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if move_out.disposition_sent_at %}
+  <span class="integrity"><span class="integrity__dot"></span>
+    Settled {{ move_out.disposition_sent_at.date().isoformat() }}</span>
+{% elif move_out.disposition_due_by and move_out.disposition_due_by < today %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span>
+    {{ (today - move_out.disposition_due_by).days }} days past the deadline</span>
+{% elif move_out.disposition_due_by %}
+  <span class="integrity"><span class="integrity__dot"></span>
+    Due by {{ move_out.disposition_due_by.isoformat() }}</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ move_out.status | humanize }}</h2>
+    <span class="panel__hint">
+      {{ unit.unit_number if unit else 'no unit' }}
+      {%- if move_out.notice_given_at %}
+        · notice {{ move_out.notice_given_at.isoformat() }}
+      {%- endif %}
+      {%- if move_out.scheduled_date %}
+        · scheduled {{ move_out.scheduled_date.isoformat() }}
+      {%- endif %}
+      {%- if move_out.is_early_termination %} · early termination{% endif %}
+    </span>
+  </div>
+  <p class="tiny">
+    <strong>{{ move_out.deposit_held | money }}</strong> was collected and is held.
+    {% if move_out.disposition_sent_at %}
+      {{ move_out.deposit_deductions | money }} withheld,
+      {{ move_out.deposit_refunded | money }} returned.
+    {% endif %}
+  </p>
+  {% if move_out.reason %}<p class="tiny muted">{{ move_out.reason }}</p>{% endif %}
+</div>
+
+{% if move_out.actual_date is none %}
+  {% if can('lease.terminate') %}
+  <div class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Record the move-out</h2>
+      <span class="panel__hint">This starts the statutory clock</span>
+    </div>
+    <p class="tiny muted">
+      The deadline is stored on this record when you save, not recomputed
+      afterwards. Whatever the disposition setting later becomes, this is the
+      date the law will be measured against.
+    </p>
+    <form method="post"
+          action="{{ url_for('admin.move_out_record', move_out_id=move_out.id) }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="actual_date">They actually left on</label>
+      <input type="date" id="actual_date" name="actual_date" required>
+      <label for="disposition_days">Disposition window, in days</label>
+      <input type="number" id="disposition_days" name="disposition_days"
+             value="21" min="1" max="365">
+      <label for="forwarding_address">Forwarding address</label>
+      <textarea id="forwarding_address" name="forwarding_address" rows="2"></textarea>
+      <label for="inspection_id">Move-out inspection id, if one was done</label>
+      <input type="text" id="inspection_id" name="inspection_id">
+      <button type="submit" class="btn">Record move-out</button>
+    </form>
+  </div>
+  {% endif %}
+{% elif move_out.disposition_sent_at is none %}
+  {% if can('deposit.release') %}
+  <div class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Settle the deposit</h2>
+      <span class="panel__hint">
+        {{ move_out.deposit_held | money }} held
+        {%- if move_out.disposition_due_by %}
+          · due by {{ move_out.disposition_due_by.isoformat() }}
+        {%- endif %}
+      </span>
+    </div>
+    <p class="tiny muted">
+      Withholding more than was collected is refused — that is a claim against
+      the resident rather than a disposition, and wants to be raised as one.
+      No deductions at all is a full refund, which is a real and common outcome.
+    </p>
+    <form method="post"
+          action="{{ url_for('admin.move_out_disposition', move_out_id=move_out.id) }}"
+          class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <label for="from_inspection_id">Take deductions from an inspection</label>
+      {# The defensible source. A failed item, photographed, on a checklist the
+         resident could see, costed at the time. A figure typed below is what a
+         magistrate disallows first. #}
+      <input type="text" id="from_inspection_id" name="from_inspection_id"
+             value="{{ move_out.inspection_id or '' }}">
+
+      <label for="deductions">Or write them out, one per line as
+        <code>description | amount</code></label>
+      <textarea id="deductions" name="deductions" rows="4"
+                placeholder="Carpet replacement, bedroom | 420.00&#10;Missing keys | 45.00"></textarea>
+
+      <button type="submit" class="btn">Send the disposition</button>
+    </form>
+  </div>
+  {% endif %}
+{% else %}
+  <div class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Disposition</h2>
+      <span class="panel__hint">
+        Sent {{ move_out.disposition_sent_at.date().isoformat() }}
+        {%- if move_out.disposition_due_by %}
+          · due by {{ move_out.disposition_due_by.isoformat() }}
+        {%- endif %}
+      </span>
+    </div>
+    {% if move_out.deduction_detail %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Deduction</th><th class="num">Amount</th></tr></thead>
+          <tbody>
+            {% for item in move_out.deduction_detail %}
+              <tr>
+                <td class="tiny">{{ item.get('description', '') }}</td>
+                <td class="num">{{ item.get('amount', '') }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">Nothing was withheld. The whole deposit was returned.</p>
+    {% endif %}
+  </div>
+{% endif %}
+
+<p class="tiny">
+  <a href="{{ url_for('admin.move_outs') }}">Back to move-outs</a>
+  {%- if lease %}
+    · <a href="{{ url_for('admin.lease_detail', lease_id=lease.id) }}">
+        {{ lease.lease_number }}
+      </a>
+  {%- endif %}
+</p>
+{% endblock %}
