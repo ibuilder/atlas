@@ -12,6 +12,21 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **SCIM 2.0 and the SSO login routes** (ROADMAP 6.6). `/scim/v2`, sitting
+  deliberately outside `/api/v1`: everything there authenticates as a person,
+  and a directory authenticates as an integration presenting a token issued to
+  it. The tenant comes from that token and from nothing in the request. The
+  token is stored hashed and shown exactly once — a leaked database should not
+  hand somebody the ability to deactivate a company — and issuing one requires
+  SCIM already be on for the provider, because a live credential for a dormant
+  integration is the one nobody watches. Errors return in SCIM's own envelope,
+  since a directory treats anything else as a transport failure and retries it.
+- **`/auth/sso/<provider>`** and its callback. The provider is named in the URL
+  rather than resolved from the submitted address: a sign-in page that reveals
+  which tenant an address belongs to is an enumeration oracle in front of the
+  login form. An unknown *or disabled* provider is a flat 404, because which
+  codes exist is not a fact a stranger needs.
+
 - **The bank reconciliation workspace is reachable** (ROADMAP 6.4). Import,
   match, flag, and sign off from `/admin/reconciliations` and over the API;
   previously only the demo seed exercised any of it. Suggestions carry the
@@ -203,6 +218,14 @@ codes and the `/api/v1` namespace are already treated as stable.
   rather than aspirational.
 
 ### Fixed
+
+- **`docs/FEATURES.md` claimed OIDC sign-on was Complete before the routes
+  existed.** The reachability guard passed it because a nightly job imports the
+  module to purge expired login states — module-level reachability is all the
+  guard measures, so one imported function makes a whole capability look
+  reached. The routes now exist, and both the guard and FEATURES record the
+  limitation: a module whose only caller is a job wants a manual look rather
+  than the benefit of the doubt.
 
 - **A decided-and-done application could be decided again.** `_assert_decidable`
   tested only "not already approved or denied" and "not still a draft", which

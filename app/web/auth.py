@@ -7,12 +7,21 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from flask.typing import ResponseReturnValue
 from flask_login import current_user, login_required, login_user, logout_user
 from werkzeug.wrappers import Response
 
-from app.errors import AccountLocked, AuthenticationRequired, MFAInvalid
+from app.errors import AccountLocked, AtlasError, AuthenticationRequired, MFAInvalid
 from app.extensions import current_session, db, limiter
 from app.models.audit import AuditAction
 from app.models.base import unscoped
@@ -175,3 +184,152 @@ def logout() -> Response:
 @auth_bp.get("/reset")
 def reset_form() -> str:
     return render_template("auth/reset.html", token=request.args.get("token", ""))
+
+
+# ---------------------------------------------------------------------------
+# Single sign-on
+# ---------------------------------------------------------------------------
+#
+# The provider is named in the URL rather than looked up from the submitted
+# email, because a sign-in page that reveals which tenant an address belongs to
+# is an enumeration oracle sitting in front of the login form.
+#
+# The redirect URI is built here from the request rather than stored on the
+# provider. It has to match byte for byte what was sent to the authorization
+# endpoint, and deriving both from one function is the only way that holds
+# after somebody changes the deployment's hostname.
+
+
+def _sso_redirect_uri(code: str) -> str:
+    return url_for("auth.sso_callback", provider_code=code, _external=True)
+
+
+def _provider_or_404(provider_code: str):  # noqa: ANN202 - IdentityProvider
+    """Resolve an *active* provider by code, across tenants.
+
+    Unauthenticated by definition — nobody has a tenant yet — so this reads
+    unscoped and then binds the tenant it finds. A disabled provider is not
+    found rather than reported as disabled: which codes exist is not a fact a
+    stranger needs.
+    """
+    from sqlalchemy import select
+
+    from app.models.base import unscoped
+    from app.models.sso import IdentityProvider
+
+    with unscoped():
+        provider = db.session.execute(
+            select(IdentityProvider).where(
+                IdentityProvider.code == provider_code,
+                IdentityProvider.is_active.is_(True),
+                IdentityProvider.deleted_at.is_(None),
+            )
+        ).scalar_one_or_none()
+    if provider is None:
+        abort(404)
+    return provider
+
+
+@auth_bp.get("/sso/<provider_code>")
+def sso_begin(provider_code: str) -> ResponseReturnValue:
+    """Send the browser to the identity provider."""
+    from app.context import RequestContext, bind_context, clear_context, new_correlation_id
+    from app.services.iam import oidc
+
+    provider = _provider_or_404(provider_code)
+    token = bind_context(
+        RequestContext(
+            correlation_id=new_correlation_id(),
+            org_id=provider.org_id,
+            actor_type="anonymous",
+            source="sso",
+        )
+    )
+    try:
+        target, _state = oidc.begin_login(
+            current_session(),
+            provider=provider,
+            redirect_uri=_sso_redirect_uri(provider_code),
+            redirect_to=request.args.get("next"),
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("auth.login_form"))
+    finally:
+        clear_context(token)
+
+    return redirect(target)
+
+
+@auth_bp.get("/sso/<provider_code>/callback")
+def sso_callback(provider_code: str) -> ResponseReturnValue:
+    """Complete the login the provider has authenticated.
+
+    The state row is *consumed* here. A callback replayed — a refreshed tab, a
+    stolen URL out of a proxy log — fails on the missing state rather than
+    minting a second session.
+    """
+    from app.context import RequestContext, bind_context, clear_context, new_correlation_id
+    from app.services.iam import oidc, session_service
+
+    provider = _provider_or_404(provider_code)
+    token = bind_context(
+        RequestContext(
+            correlation_id=new_correlation_id(),
+            org_id=provider.org_id,
+            actor_type="anonymous",
+            source="sso",
+        )
+    )
+    try:
+        if request.args.get("error"):
+            # The provider's own words, not ours: "access_denied" from an IdP
+            # means something specific that we should not paraphrase.
+            flash(f"Your identity provider refused the sign-in ({request.args['error']}).", "error")
+            return redirect(url_for("auth.login_form"))
+
+        code = request.args.get("code") or ""
+        state_value = request.args.get("state") or ""
+        if not code or not state_value:
+            flash("That sign-in link is incomplete.", "error")
+            return redirect(url_for("auth.login_form"))
+
+        state = oidc.consume_state(current_session(), state_value=state_value)
+        tokens = oidc.exchange_code(
+            current_session(),
+            provider=provider,
+            code=code,
+            redirect_uri=_sso_redirect_uri(provider_code),
+            code_verifier=state.code_verifier,
+        )
+        claims = oidc.verify_id_token(
+            current_session(),
+            provider=provider,
+            id_token=tokens.get("id_token") or "",
+            nonce=state.nonce,
+        )
+        user = oidc.complete_login(
+            current_session(),
+            provider=provider,
+            identity=oidc.identity_from_claims(provider, claims),
+        )
+        # The directory has already authenticated them, and a second factor
+        # here would be one the directory is better placed to enforce.
+        user_session, session_token = session_service.create_user_session(
+            user, mfa_verified=True, session=current_session()
+        )
+        db.session.commit()
+        redirect_to = state.redirect_to
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return redirect(url_for("auth.login_form"))
+    finally:
+        clear_context(token)
+
+    session_helpers.rotate_session()
+    login_user(user, remember=False)
+    session_helpers.store_session_token(session_token)
+    return redirect(_safe_next(redirect_to))

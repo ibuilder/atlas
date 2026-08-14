@@ -13,7 +13,16 @@ import datetime as dt
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, abort, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from flask_login import current_user, login_required
 from sqlalchemy import func, select
 from werkzeug.wrappers import Response
@@ -388,6 +397,74 @@ def ownership() -> str:
         as_of=as_of,
         owners=sorted(owners.values(), key=lambda owner: owner.name),
     )
+
+
+@admin_bp.get("/identity-providers")
+@login_required
+def identity_providers() -> str:
+    """Single sign-on and directory provisioning.
+
+    The SCIM token is shown once, at the moment it is issued, and never again.
+    Storing it recoverably would mean a leaked database hands somebody the
+    ability to deactivate every account in the tenant.
+    """
+    require(Perm.INTEGRATION_READ)
+    org_id = require_org_scope()
+
+    from app.models.sso import IdentityProvider
+
+    return render_template(
+        "admin/identity_providers.html",
+        providers=list(
+            db.session.execute(
+                select(IdentityProvider)
+                .where(IdentityProvider.org_id == org_id)
+                .order_by(IdentityProvider.code)
+            ).scalars()
+        ),
+        # Handed over exactly once, on the redirect that issued it.
+        issued_token=session.pop("scim_token_once", None),
+    )
+
+
+@admin_bp.post("/identity-providers/<id:provider_id>/scim-token")
+@login_required
+def identity_provider_scim_token(provider_id: str) -> Response:
+    """Issue or revoke the bearer token the directory presents."""
+    require(Perm.INTEGRATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.sso import IdentityProvider
+    from app.services.iam.scim import issue_scim_token, revoke_scim_token
+
+    provider = db.session.get(IdentityProvider, provider_id)
+    if provider is None or provider.org_id != org_id:
+        abort(404)
+    back = redirect(url_for("admin.identity_providers"))
+    action = (request.form.get("action") or "").strip().lower()
+
+    try:
+        if action == "issue":
+            token = issue_scim_token(current_session(), provider=provider, actor_id=current_user.id)
+            # Through the session rather than the flash body: a token in a
+            # flash message ends up in whatever renders flashes, and this one
+            # should be on exactly one page for exactly one reader.
+            session["scim_token_once"] = token
+            message = "Token issued. It is shown once and cannot be recovered."
+        elif action == "revoke":
+            revoke_scim_token(current_session(), provider=provider, actor_id=current_user.id)
+            message = "Token revoked. The directory can no longer call."
+        else:
+            flash("That is not something you can do to a token.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back
 
 
 @admin_bp.get("/reconciliations")

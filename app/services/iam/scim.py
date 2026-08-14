@@ -44,8 +44,11 @@ __all__ = [
     "apply_patch",
     "create_user_resource",
     "deactivate_resource",
+    "issue_scim_token",
     "list_users",
+    "provider_for_token",
     "replace_user_resource",
+    "revoke_scim_token",
     "to_scim_user",
 ]
 
@@ -451,3 +454,115 @@ def purge_deactivated(
         .all()
     )
     return len(stale)
+
+
+# ---------------------------------------------------------------------------
+# The credential the directory presents
+# ---------------------------------------------------------------------------
+
+
+def issue_scim_token(
+    session: Session, *, provider: IdentityProvider, actor_id: str | None = None
+) -> str:
+    """Mint a bearer token for this provider, returning it once.
+
+    Stored hashed, for the same reason a password is: a leaked database should
+    not hand somebody the ability to deactivate every account in the tenant.
+    The plaintext is returned here and never again — an administrator who
+    loses it issues a new one, which is a smaller problem than a recoverable
+    credential that can deactivate a company.
+    """
+    from app.security.crypto import hash_token, new_token, token_fingerprint
+
+    if not provider.scim_enabled:
+        raise ValidationFailed(
+            "Turn SCIM on for this provider before issuing it a token. A live "
+            "credential for a disabled integration is a credential nobody watches."
+        )
+
+    token = new_token(prefix="scim_")
+    provider.scim_token_hash = hash_token(token)
+    provider.scim_token_fingerprint = token_fingerprint(token)
+    provider.scim_token_issued_at = utcnow()
+    session.flush()
+
+    record_audit_event(
+        action=AuditAction.INTEGRATION_CONFIGURED,
+        resource_type="IdentityProvider",
+        resource_id=provider.id,
+        resource_label=provider.code,
+        severity=AuditSeverity.CRITICAL,
+        payload={"scim_token": "issued", "fingerprint": provider.scim_token_fingerprint},
+        reason="A SCIM bearer token was issued. It can deactivate any account in this tenant.",
+        org_id=provider.org_id,
+        actor_id=actor_id,
+        session=session,
+    )
+    return token
+
+
+def revoke_scim_token(
+    session: Session, *, provider: IdentityProvider, actor_id: str | None = None
+) -> IdentityProvider:
+    """Withdraw the credential. The directory stops being able to call."""
+    provider.scim_token_hash = None
+    provider.scim_token_fingerprint = None
+    provider.scim_token_issued_at = None
+    session.flush()
+
+    record_audit_event(
+        action=AuditAction.INTEGRATION_CONFIGURED,
+        resource_type="IdentityProvider",
+        resource_id=provider.id,
+        resource_label=provider.code,
+        severity=AuditSeverity.CRITICAL,
+        payload={"scim_token": "revoked"},
+        reason="The SCIM bearer token was revoked.",
+        org_id=provider.org_id,
+        actor_id=actor_id,
+        session=session,
+    )
+    return provider
+
+
+def provider_for_token(session: Session, token: str) -> IdentityProvider:
+    """The provider this bearer token speaks for.
+
+    Looked up by hash across every tenant, because the caller is a directory
+    that has not told us which tenant it is — the token *is* the claim. Only
+    an active, SCIM-enabled provider is accepted: a credential that outlives
+    the integration it was issued for is exactly the one nobody notices.
+    """
+    from app.security.crypto import compare_digest, hash_token
+
+    presented = (token or "").strip()
+    if not presented:
+        raise PermissionDenied("A SCIM request must present a bearer token.")
+
+    digest = hash_token(presented)
+    from app.models.base import unscoped
+
+    with unscoped():
+        candidates = (
+            session.execute(
+                select(IdentityProvider).where(
+                    IdentityProvider.scim_token_hash.is_not(None),
+                    IdentityProvider.deleted_at.is_(None),
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    for provider in candidates:
+        # Constant-time even though the hash is not itself secret: the loop
+        # should not leak which prefix matched.
+        if provider.scim_token_hash and compare_digest(provider.scim_token_hash, digest):
+            if not provider.is_active or not provider.scim_enabled:
+                raise PermissionDenied(
+                    "That token belongs to a provider whose SCIM integration is off."
+                )
+            provider.scim_last_seen_at = utcnow()
+            return provider
+
+    raise PermissionDenied("That SCIM token is not recognised.")

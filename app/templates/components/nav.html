@@ -42,12 +42,16 @@
   {% endif %}
 </div>
 
-{% if can('user.read') or can('role.read') %}
+{% if can('user.read') or can('role.read') or can('integration.read') %}
 <div class="sidebar__group">
   <div class="sidebar__label">Administration</div>
   {% if can('user.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.users') }}"
        {% if active == 'users' %}aria-current="page"{% endif %}>People</a>
+  {% endif %}
+  {% if can('integration.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.identity_providers') }}"
+       {% if active == 'identity_providers' %}aria-current="page"{% endif %}>Single sign-on</a>
   {% endif %}
   {% if can('role.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.roles') }}"

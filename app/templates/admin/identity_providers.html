@@ -1,0 +1,135 @@
+{# Single sign-on and directory provisioning.
+
+   The SCIM token appears exactly once, on the page that issued it. It is
+   stored hashed, so nothing here can show it again — and that is the point:
+   a leaked database should not hand somebody the ability to deactivate every
+   account in the tenant.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Identity providers · {{ app_name }}{% endblock %}
+{% block heading %}Identity providers{% endblock %}
+{% block nav %}{{ admin_nav('identity_providers') }}{% endblock %}
+
+{% block topbar_meta %}
+{% set live = providers | selectattr('is_active') | list %}
+<span class="integrity"><span class="integrity__dot"></span>
+  {{ live | length }} active</span>
+{% endblock %}
+
+{% block content %}
+{% if issued_token %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Your SCIM token</h2>
+    <span class="panel__hint">Shown once. Copy it now.</span>
+  </div>
+  <p><code>{{ issued_token }}</code></p>
+  <p class="tiny muted">
+    Give this to the directory as a bearer token. It is stored hashed here, so
+    this page cannot show it to you again — reloading will not bring it back.
+    If it is lost, issue a new one; that is a smaller problem than a credential
+    which can deactivate a company being recoverable from a backup.
+  </p>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Providers</h2>
+    <span class="panel__hint">{{ providers | length }} configured</span>
+  </div>
+
+  {% if providers %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Code</th><th>Name</th><th>Protocol</th><th>Active</th>
+            <th>Sign-in link</th><th>SCIM</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for provider in providers %}
+            <tr>
+              <td class="tiny">{{ provider.code }}</td>
+              <td>{{ provider.name }}</td>
+              <td class="tiny muted">{{ provider.protocol | humanize }}</td>
+              <td class="tiny">
+                {% if provider.is_active %}Yes{% else %}
+                  <span class="pill">No</span>
+                {% endif %}
+              </td>
+              <td class="tiny muted">
+                {% if provider.is_active %}
+                  <code>{{ url_for('auth.sso_begin', provider_code=provider.code) }}</code>
+                {% else %}—{% endif %}
+              </td>
+              <td class="tiny">
+                {% if not provider.scim_enabled %}
+                  <span class="muted">off</span>
+                {% elif provider.scim_token_hash %}
+                  issued {{ provider.scim_token_issued_at.date().isoformat()
+                            if provider.scim_token_issued_at else '' }}
+                  <span class="muted">…{{ provider.scim_token_fingerprint }}</span>
+                  {%- if provider.scim_last_seen_at %}
+                    <br><span class="muted">last called
+                      {{ provider.scim_last_seen_at.date().isoformat() }}</span>
+                  {%- else %}
+                    <br><span class="pill">never used</span>
+                  {%- endif %}
+                {% else %}
+                  <span class="pill">no token</span>
+                {% endif %}
+              </td>
+              <td class="tiny">
+                {% if can('integration.manage') and provider.scim_enabled %}
+                  <form method="post" class="inline-form"
+                        action="{{ url_for('admin.identity_provider_scim_token',
+                                           provider_id=provider.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" name="action" value="issue" class="btn btn--quiet">
+                      {{ 'Reissue' if provider.scim_token_hash else 'Issue token' }}
+                    </button>
+                    {% if provider.scim_token_hash %}
+                      <button type="submit" name="action" value="revoke" class="btn btn--quiet">
+                        Revoke
+                      </button>
+                    {% endif %}
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">
+      No provider is configured. Sign-in runs on passwords until one is.
+    </p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">What SCIM is for</h2>
+  </div>
+  <p class="tiny muted">
+    Offboarding. Somebody leaves, HR disables them in the directory, and their
+    access here goes with it without anybody remembering to do anything. A
+    <code>PATCH</code> setting <code>active: false</code> disables the account
+    <em>and revokes its live sessions</em> in the same operation — marking a
+    user inactive while leaving a session token is offboarding that does not
+    offboard. Accounts owned by a directory are read-only here, because a local
+    edit would otherwise either be reverted at the next sync or silently
+    override an offboarding, depending on timing.
+  </p>
+  <p class="tiny muted">
+    The endpoint is <code>/scim/v2</code>. Deletion deactivates rather than
+    removing the row: a user id appears on ledger entries, audit events, and
+    approvals.
+  </p>
+</div>
+{% endblock %}

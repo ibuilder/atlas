@@ -751,7 +751,12 @@ def _seed_sso(organization) -> int:  # noqa: ANN001
             default_role_code="property_manager",
             groups_claim="groups",
             group_role_map={"Atlas-Admins": "org_admin", "Atlas-Accounting": "accountant"},
-            scim_enabled=False,
+            # On, so the console shows the SCIM panel and an administrator can
+            # issue a token against it. Deliberately left *without* one: the
+            # demo should not ship a live credential that can deactivate every
+            # account in the tenant, and issuing it is one click for whoever
+            # actually wants to try the endpoints.
+            scim_enabled=True,
         )
     )
     db.session.flush()

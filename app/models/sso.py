@@ -110,6 +110,15 @@ class IdentityProvider(TenantModel, SoftDeleteMixin):
     require_signed_assertions: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     #: Directory provisioning: accounts from this provider are read-only here.
     scim_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    #: SHA-256 of the bearer token the directory presents. Hashed rather than
+    #: stored, for the same reason a password is: a leaked database should not
+    #: hand somebody the ability to deactivate every account in the tenant.
+    scim_token_hash: Mapped[str | None] = mapped_column(String(64))
+    #: The last few characters, so an administrator can tell two tokens apart
+    #: without either of them being recoverable.
+    scim_token_fingerprint: Mapped[str | None] = mapped_column(String(16))
+    scim_token_issued_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+    scim_last_seen_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
 
     last_login_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
     login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

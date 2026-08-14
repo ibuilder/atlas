@@ -218,6 +218,12 @@ def _register_blueprints(app: Flask, settings: Settings) -> None:
 
     app.register_blueprint(api_v1_bp, url_prefix="/api/v1")
 
+    # Deliberately outside /api/v1: everything there authenticates as a person,
+    # and SCIM authenticates as an integration presenting a token issued to it.
+    from app.api.scim import scim_bp
+
+    app.register_blueprint(scim_bp, url_prefix="/scim")
+
     from app.web import register_web_blueprints
 
     register_web_blueprints(app, settings)

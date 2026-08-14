@@ -46,6 +46,14 @@ pytestmark = pytest.mark.unit
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SERVICES = ROOT / "app" / "services"
 
+# What this guard measures is *module* reachability, and that is coarser than
+# it looks. OIDC single sign-on passed for months because a nightly job imports
+# the module to purge expired login states — while `/auth/sso/...` did not
+# exist, so no human could sign on. One imported function makes the whole
+# module look reached. A per-function version would catch that and is a much
+# larger change; until then, a module whose only caller is a job deserves a
+# manual look rather than the benefit of the doubt.
+
 #: Callers that do not count as a surface. See the module docstring.
 NOT_A_SURFACE = {
     "app/cli/seed.py",
@@ -56,10 +64,6 @@ NOT_A_SURFACE = {
 #: them. These are whole capabilities that exist in the codebase and not in the
 #: product.
 NO_SURFACE: dict[str, str] = {
-    "iam/scim": (
-        "Directory provisioning, which is HTTP endpoints by definition - an "
-        "identity provider has nothing to call."
-    ),
     "imports/bulk": (
         "CSV import with a read-only plan step. The plan is the point and nobody can ask for one."
     ),
