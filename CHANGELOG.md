@@ -12,8 +12,40 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
-- **The last five capability gaps are closed.** `docs/FEATURES.md` now has no
-  `Partial`, `Seam`, or `Modelled` rows.
+- **Signing works.** The envelope lifecycle shipped with no route anywhere: the
+  only caller was the demo seed. All three portals now list what is awaiting the
+  signed-in person, show the consent wording immediately above the field, and
+  take a typed name with the IP and user agent captured from that request.
+  Staff raise, send, and void through `/api/v1/envelopes` behind a new
+  `esign.manage`. Signing itself needs no permission — a signer is authorised by
+  being *named on the envelope*, which is a fact about the envelope rather than
+  a grant anyone can be given. An hourly sweep lapses envelopes nobody
+  completed, which the model always had a date for and nothing ever acted on.
+- **A reachability guard**, `tests/unit/test_service_reachability.py`. It asks
+  the one question a test suite cannot ask of itself — can anybody who is not a
+  test get here? — and fails the build when a service module becomes unreachable
+  without being recorded, or when a recorded one is fixed and the entry is left
+  behind. The demo seed deliberately does not count as a surface; treating it as
+  one is exactly how the e-sign gap hid.
+- **`docs/FEATURES.md` gains a `No surface` status**, and eleven rows move to
+  it. They read `Complete`, which that file's legend defines as "usable end to
+  end", and they were not: the leasing funnel past leads, move-outs and deposit
+  disposition, accounts payable, SCIM, bulk import, document extraction, bank
+  reconciliation, inspections, the space hierarchy, and asset lifecycle are all
+  implemented and tested with no route, view, or job that reaches them. The
+  table and the guard now have to agree.
+- **`ROADMAP.md` gains 0.6.0 — "Make it operable"**, which is those surfaces and
+  nothing else. No new domain logic; the domain logic is already written.
+- The demo seeds message threads, two turns, and two signature envelopes — one
+  executed, one waiting in the resident's portal, because a completed envelope
+  demonstrates the record but not the act. One thread is internal and anchored
+  to the same lease as the resident's own, so the visibility rule can be checked
+  rather than believed.
+
+- **The last five capability gaps are closed.** `docs/FEATURES.md` has no
+  `Partial`, `Seam`, or `Modelled` rows. It has eleven **No surface** rows
+  instead — see below; closing those gaps in the services turned out not to be
+  the same thing as making them usable, and the table now says so.
 - **Ownership transfer.** Stakes were time-bounded and statements already
   weighted each day separately, but nothing could move a stake, so a property
   changing hands had to be edited by hand — destroying the history the temporal
@@ -102,6 +134,23 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Fixed
 
+- **An owner could not see a thread addressed to them.** `visible_threads`
+  compared one flat list of ids against `subject_id` regardless of
+  `subject_type`; for an owner that list is *property* ids, so a thread anchored
+  to `subject_type="owner"` — how a distribution query is filed — matched
+  nothing. It failed closed rather than open, so not a disclosure; it hid the
+  office's message from the person it was addressed to. Holdings are now keyed
+  by the subject type they anchor. A thread addressed to a resident directly
+  also now survives the end of their tenancy, because a deposit dispute outlives
+  the lease it concerns.
+- **A cancelled turn stranded its unit.** `start_turn` sets the unit to TURN and
+  `cancel_turn` never put it back; nothing else sets that status, so the unit
+  would never again read as occupied or lettable and no report would show it.
+  The turn now records what the unit was before it took it.
+- The e-sign swap detection voids the envelope and writes a CRITICAL audit
+  event, then raises — so a caller using `transaction()` rolled both back and
+  the detection left no trace. It now logs at error level first, outside the
+  transaction.
 - **The configured malware scanner was unreachable.** `get_scanner` read
   `malware_scanner` through a `getattr` default, and the setting did not exist
   — so the fallback fired every time and selecting ClamAV was impossible. The

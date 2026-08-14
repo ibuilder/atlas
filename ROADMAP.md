@@ -176,6 +176,83 @@ a document a human can check, which is the shape ADR-0006 requires.
 
 ---
 
+## 0.6.0 — Make it operable
+
+Ten service modules are implemented, tested, and reachable by nothing a user can
+get to. `tests/unit/test_service_reachability.py` enumerates them and fails the
+build if the list grows; `docs/FEATURES.md` marks them **No surface**. This
+milestone is the surfaces, and nothing else — no new domain logic, because the
+domain logic is already written and already covered.
+
+The sequencing is by consequence rather than by size. Each item is done when the
+capability can be exercised end to end by a signed-in human, its module leaves
+the reachability list, and its FEATURES row honestly reads **Complete**.
+
+| # | Item | Size |
+|---|---|---|
+| 6.1 | Leasing funnel: application, screening, decision, conversion | L |
+| 6.2 | Move-outs, renewals, and deposit disposition | L |
+| 6.3 | Accounts payable: bills, approval, disbursement | M |
+| 6.4 | Bank reconciliation workspace | M |
+| 6.5 | Inspections: schedule, perform, complete | M |
+| 6.6 | SCIM 2.0 endpoints and the SSO login routes | M |
+| 6.7 | Bulk import: upload, plan, apply | S |
+| 6.8 | Document extraction review queue | S |
+| 6.9 | Spaces and asset lifecycle management | M |
+
+**6.1** first because the funnel currently stops at leads: there is no path from
+an enquiry to a tenancy, which makes the several services behind it — consent
+before screening, criteria snapshotted at the decision, individual assessment
+for criminal history — protections on a road nobody can drive. Needs the
+applicant-facing intake as well as the staff decision screen; a decision surface
+alone still leaves applications with no way in.
+
+**6.2** carries the most legal weight of anything on this list. The statutory
+disposition clock starts at the move-out, and today a move-out can only be
+recorded from code — so the deadline that decides whether deductions are
+forfeit depends on somebody running a script. Renewals belong with it because
+they share the same lease-end conversation.
+
+**6.3** because money coming in has three surfaces and money going out has none.
+Separation of duties is enforced by the service already; the surface has to keep
+the two roles apart rather than reintroducing a screen where one person can
+record and pay.
+
+**6.4** and **6.5** are both currently exercised only by the demo seed. The
+reconciliation workspace is the larger of the two: statement upload, the ranked
+match suggestions with their reasons, exceptions, and a sign-off that refuses
+while anything disagrees.
+
+**6.6** is the one where the missing surface *is* the feature. SCIM is an HTTP
+contract, so an identity provider has nothing to call, and the OIDC and SAML
+services have no login route to drive them. Until this ships, "single sign-on"
+means the code exists.
+
+**6.7** to **6.9** are smaller and independent, and can be picked up in any
+order once the four above are done. **6.8** matters more than its size suggests:
+extraction produces *suggestions* per ADR-0006, and the accept-or-reject review
+is the whole safeguard — shipping extraction without the review would be the
+one thing that ADR forbids.
+
+### Acceptance for the milestone
+
+- [ ] `NO_SURFACE` and `SEED_ONLY` in `tests/unit/test_service_reachability.py`
+      are both empty, and the guard is left in place so the next module cannot
+      arrive unreachable.
+- [ ] `docs/FEATURES.md` has no **No surface** rows.
+- [ ] Every new surface is covered the way the portal write surfaces are: a
+      happy path, a refusal the service raises and the surface must not swallow,
+      and the same request aimed at another tenant's record returning 404.
+
+### What this milestone deliberately does not do
+
+Add capability. Every service in it is already written, tested, and — in nine
+cases out of ten — already exercised against realistic data by the demo seed.
+If something here turns out to need new domain logic, that is a finding worth
+recording rather than a licence to widen the milestone.
+
+---
+
 ## 1.0.0 — General availability
 
 Not a feature milestone. The conditions under which we would put a customer's
