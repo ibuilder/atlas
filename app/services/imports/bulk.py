@@ -175,7 +175,7 @@ def _date(value: Any, *, column: str) -> dt.date | None:
         except ValueError:
             continue
     raise ValidationFailed(
-        f"'{value}' in column '{column}' is not a date Atlas recognises " "(try YYYY-MM-DD)."
+        f"'{value}' in column '{column}' is not a date Atlas recognises (try YYYY-MM-DD)."
     )
 
 

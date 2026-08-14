@@ -1,0 +1,182 @@
+{# One inspection, and the checklist as it was actually asked.
+
+   The two blockers to sign-off are stated above the button rather than
+   discovered by pressing it: an item with no finding, and a failed item that
+   demands a photo and has none. Nobody can take that photo retrospectively,
+   which is why the refusal has to land here and not at a deposit disposition
+   three weeks later.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ inspection.inspection_number }} · {{ app_name }}{% endblock %}
+{% block heading %}Inspection {{ inspection.inspection_number }}{% endblock %}
+{% block nav %}{{ admin_nav('inspections') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if inspection.result and inspection.result.value == 'fail' %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span> Failed</span>
+{% else %}
+  <span class="integrity"><span class="integrity__dot"></span>
+    {{ inspection.status | humanize }}</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">
+      {{ inspection.kind | humanize }} —
+      {{ property.name if property else inspection.property_id }}
+      {%- if unit %}, {{ unit.unit_number }}{% endif %}
+    </h2>
+    <span class="panel__hint">
+      {%- if inspection.scheduled_for %}
+        Scheduled {{ inspection.scheduled_for.date().isoformat() }}
+      {%- endif %}
+      {%- if inspection.completed_at %}
+        · completed {{ inspection.completed_at.date().isoformat() }}
+      {%- endif %}
+      {%- if inspection.captured_offline %} · captured offline{% endif %}
+    </span>
+  </div>
+
+  {% if inspection.status != 'completed' %}
+    {% if unanswered %}
+      <p class="tiny">
+        <strong>{{ unanswered | length }}</strong> item{{ '' if unanswered | length == 1 else 's' }}
+        with no finding yet.
+      </p>
+    {% endif %}
+    {% if missing_photos %}
+      <p class="tiny">
+        <span class="pill pill--critical">Evidence outstanding</span>
+        {{ missing_photos | length }} failed item{{ '' if missing_photos | length == 1 else 's' }}
+        require a photo before this can be signed off. That photo is what makes
+        a deduction defensible months later, and it cannot be taken afterwards.
+      </p>
+    {% endif %}
+  {% endif %}
+
+  {% if inspection.notes %}<p class="tiny muted">{{ inspection.notes }}</p>{% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Checklist</h2>
+    <span class="panel__hint">
+      {{ items | length }} items, as asked at the version used
+    </span>
+  </div>
+
+  {% if items %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Section</th><th>Item</th><th>Finding</th><th>Note</th>
+            <th class="num">Remedy</th><th>Resident</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            <tr>
+              <td class="tiny muted">{{ item.section }}</td>
+              <td>
+                {{ item.name }}
+                {%- if item.requires_photo %}
+                  <span class="tiny muted">· photo required</span>
+                {%- endif %}
+              </td>
+              <td class="tiny">
+                {% if item.result is none %}
+                  <span class="muted">—</span>
+                {% elif item.result.value == 'fail' %}
+                  <span class="pill pill--critical">Fail</span>
+                {% else %}
+                  {{ item.result | humanize }}
+                {% endif %}
+              </td>
+              <td class="tiny muted">{{ item.notes or '' }}</td>
+              <td class="num">
+                {{ item.remedy_cost | money if item.remedy_cost is not none else '—' }}
+              </td>
+              <td class="tiny">{{ 'Yes' if item.is_resident_responsible else '' }}</td>
+              <td class="tiny">
+                {% if item.work_order_id %}
+                  <span class="pill">work raised</span>
+                {% elif can('inspection.perform') and inspection.status != 'completed' %}
+                  {# Re-recording overwrites rather than appends: a replayed
+                     capture must not leave two findings on one line. #}
+                  <form method="post" class="inline-form"
+                        action="{{ url_for('admin.inspection_record',
+                                           inspection_id=inspection.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="item_id" value="{{ item.id }}">
+                    <select name="result">
+                      {% for value in results %}
+                        <option value="{{ value }}"
+                                {% if item.result and item.result.value == value %}selected{% endif %}>
+                          {{ value | humanize }}
+                        </option>
+                      {% endfor %}
+                    </select>
+                    <input type="text" name="notes" maxlength="2000" placeholder="What you saw"
+                           value="{{ item.notes or '' }}">
+                    <input type="text" name="remedy_cost" inputmode="decimal"
+                           placeholder="Cost to remedy"
+                           value="{{ item.remedy_cost if item.remedy_cost is not none else '' }}">
+                    <label class="tiny">
+                      <input type="checkbox" name="is_resident_responsible" value="1"
+                             {% if item.is_resident_responsible %}checked{% endif %}>
+                      Resident
+                    </label>
+                    <button type="submit" class="btn btn--quiet">Record</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">
+      This inspection was booked without a checklist, so there is nothing to
+      record against. Book one with a template if you need findings.
+    </p>
+  {% endif %}
+</div>
+
+{% if can('inspection.perform') and inspection.status != 'completed' and items %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Sign off</h2>
+    <span class="panel__hint">
+      {% if unanswered or missing_photos %}
+        Refused while anything above is outstanding
+      {% else %}
+        Everything is answered and evidenced
+      {% endif %}
+    </span>
+  </div>
+
+  <form method="post"
+        action="{{ url_for('admin.inspection_complete', inspection_id=inspection.id) }}"
+        class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="notes">Closing notes</label>
+    <textarea id="notes" name="notes" rows="3" maxlength="4000"></textarea>
+    <label class="tiny">
+      <input type="checkbox" name="inspector_signed" value="1" checked> Inspector signed
+    </label>
+    <label class="tiny">
+      <input type="checkbox" name="resident_signed" value="1"> Resident signed
+    </label>
+    <button type="submit" class="btn">Complete and raise work</button>
+  </form>
+</div>
+{% endif %}
+
+<p class="tiny"><a href="{{ url_for('admin.inspections') }}">Back to inspections</a></p>
+{% endblock %}

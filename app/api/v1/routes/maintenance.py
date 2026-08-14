@@ -25,12 +25,19 @@ from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.maintenance import (
     WORK_ORDER_TERMINAL,
+    Inspection,
     MaintenanceRequest,
     WorkOrder,
     WorkOrderEvent,
 )
 from app.models.types import utcnow
 from app.schemas.operations import (
+    FindingIn,
+    InspectionComplete,
+    InspectionItemOut,
+    InspectionListQuery,
+    InspectionOut,
+    InspectionSchedule,
     MaintenanceRequestCreate,
     MaintenanceRequestListQuery,
     MaintenanceRequestOut,
@@ -43,6 +50,7 @@ from app.schemas.operations import (
 from app.security.permissions import Perm
 from app.security.policies import require
 from app.services.common.unit_of_work import transaction
+from app.services.maintenance import inspections
 from app.services.maintenance import service as maintenance_service
 
 __all__ = []
@@ -260,5 +268,174 @@ def work_order_timeline(work_order_id: str) -> Response:
                 )
                 for event in events
             ]
+        }
+    )
+
+
+# -------------------------------------------------------------- inspections
+#
+# The checklist is copied onto the inspection at the template version used, so
+# editing a template later never changes what a completed inspection appears to
+# have asked. Sign-off refuses an unanswered item and refuses a failed item
+# that demands a photo and has none — those photos are what make a deduction
+# defensible months later, and they cannot be taken retrospectively.
+
+
+def _inspection_or_404(inspection_id: str, org_id: str) -> Inspection:
+    record = db.session.get(Inspection, inspection_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That inspection was not found.")
+    return record
+
+
+@api_v1_bp.get("/inspections", endpoint="inspections_list")
+def list_inspections() -> Response:
+    require(Perm.INSPECTION_READ)
+    query = parse_query(InspectionListQuery)
+    org_id = require_org_scope()
+
+    stmt = select(Inspection).where(Inspection.org_id == org_id)
+    if query.status:
+        stmt = stmt.where(Inspection.status == query.status)
+    if query.kind:
+        stmt = stmt.where(Inspection.kind == query.kind)
+    if query.property_id:
+        stmt = stmt.where(Inspection.property_id == query.property_id)
+    if query.unit_id:
+        stmt = stmt.where(Inspection.unit_id == query.unit_id)
+
+    page = paginate(current_session(), stmt, Inspection, limit=query.limit, cursor=query.cursor)
+    return respond_collection(page, InspectionOut)
+
+
+@api_v1_bp.get("/inspections/<id:inspection_id>", endpoint="inspections_get")
+def get_inspection(inspection_id: str) -> Response:
+    """One inspection and its checklist as performed."""
+    require(Perm.INSPECTION_READ)
+    org_id = require_org_scope()
+
+    record = _inspection_or_404(inspection_id, org_id)
+    return respond(
+        {
+            **InspectionOut.model_validate(record, from_attributes=True).model_dump(mode="json"),
+            "items": [
+                InspectionItemOut.model_validate(item, from_attributes=True).model_dump(mode="json")
+                for item in sorted(record.items, key=lambda i: i.sort_order)
+            ],
+        }
+    )
+
+
+@api_v1_bp.post("/inspections", endpoint="inspections_schedule")
+def schedule_inspection() -> Response:
+    """Book an inspection, freezing its checklist at the template version used."""
+    require(Perm.INSPECTION_MANAGE)
+    payload = parse_body(InspectionSchedule)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        template = (
+            inspections.current_template(session, org_id=org_id, code=payload.template_code)
+            if payload.template_code
+            else None
+        )
+        record = inspections.schedule_inspection(
+            session,
+            org_id=org_id,
+            kind=payload.kind,
+            property_id=payload.property_id,
+            template=template,
+            unit_id=payload.unit_id,
+            lease_id=payload.lease_id,
+            scheduled_for=payload.scheduled_for,
+            inspector_user_id=payload.inspector_user_id,
+            inspector_vendor_id=payload.inspector_vendor_id,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        InspectionOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/inspections/{record.id}",
+    )
+
+
+@api_v1_bp.post("/inspections/<id:inspection_id>/start", endpoint="inspections_start")
+def start_inspection(inspection_id: str) -> Response:
+    require(Perm.INSPECTION_PERFORM)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = inspections.start_inspection(
+            session, inspection=_inspection_or_404(inspection_id, org_id)
+        )
+
+    return respond(InspectionOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/inspections/<id:inspection_id>/findings", endpoint="inspections_record")
+def record_findings(inspection_id: str) -> Response:
+    """Record observations. Re-recording an item overwrites it.
+
+    Overwriting rather than appending is the point: a field device replaying a
+    capture must not leave two findings on one checklist line.
+    """
+    require(Perm.INSPECTION_PERFORM)
+    payload = parse_body(FindingIn)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        inspection = _inspection_or_404(inspection_id, org_id)
+        item = inspections.record_finding(
+            session,
+            inspection=inspection,
+            finding=inspections.ItemFinding(
+                item_id=payload.item_id,
+                result=payload.result,
+                condition=payload.condition,
+                severity=payload.severity,
+                notes=payload.notes,
+                remedy_cost=payload.remedy_cost,
+                is_resident_responsible=payload.is_resident_responsible,
+            ),
+        )
+
+    return respond(InspectionItemOut.model_validate(item, from_attributes=True))
+
+
+@api_v1_bp.post("/inspections/<id:inspection_id>/complete", endpoint="inspections_complete")
+def complete_inspection(inspection_id: str) -> Response:
+    """Sign off, and raise work from what failed.
+
+    Refused while an item has no finding, and refused while a failed item that
+    demands a photo has none. Those photos are what make a deduction defensible
+    months later, and nobody can take them retrospectively.
+    """
+    require(Perm.INSPECTION_PERFORM)
+    payload = parse_body(InspectionComplete)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        inspection = _inspection_or_404(inspection_id, org_id)
+        record = inspections.complete_inspection(
+            session,
+            inspection=inspection,
+            notes=payload.notes,
+            inspector_signed=payload.inspector_signed,
+            resident_signed=payload.resident_signed,
+            actor_id=current_user.id,
+        )
+        raised = (
+            inspections.raise_work_orders_from_findings(
+                session, inspection=record, actor_id=current_user.id
+            )
+            if payload.raise_work
+            else []
+        )
+        raised_ids = [work_order.id for work_order in raised]
+
+    return respond(
+        {
+            **InspectionOut.model_validate(record, from_attributes=True).model_dump(mode="json"),
+            "work_orders_raised": raised_ids,
         }
     )

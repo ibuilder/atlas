@@ -284,10 +284,10 @@ def complete_inspection(
     unanswered = [item.name for item in inspection.items if item.result is None]
     if unanswered:
         raise ValidationFailed(
-            f"{len(unanswered)} checklist item(s) have no finding: " f"{', '.join(unanswered[:5])}."
+            f"{len(unanswered)} checklist item(s) have no finding: {', '.join(unanswered[:5])}."
         )
 
-    missing_evidence = _items_missing_photos(session, inspection)
+    missing_evidence = items_missing_evidence(session, inspection)
     if missing_evidence:
         raise ValidationFailed(
             "These items require a photo before sign-off: "
@@ -327,11 +327,15 @@ def complete_inspection(
     return inspection
 
 
-def _items_missing_photos(session: Session, inspection: Inspection) -> list[InspectionItem]:
+def items_missing_evidence(session: Session, inspection: Inspection) -> list[InspectionItem]:
     """Items that demand evidence and do not have any.
 
     Only findings that are not a clean pass need it - photographing forty
     working light switches is how a checklist stops being completed honestly.
+
+    Public because the surfaces have to show this before sign-off is attempted,
+    and a surface that reimplements the rule is a surface that will drift from
+    it. One definition, two readers.
     """
     needing = [
         item

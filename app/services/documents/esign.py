@@ -366,7 +366,7 @@ def record_signature(
         )
     if envelope.expires_at is not None and utcnow() > envelope.expires_at:
         raise BusinessRuleViolation(
-            "That envelope expired. Issue a new one rather than signing a stale " "document."
+            "That envelope expired. Issue a new one rather than signing a stale document."
         )
 
     name = (typed_name or "").strip()

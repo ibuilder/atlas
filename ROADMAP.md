@@ -194,7 +194,7 @@ the reachability list, and its FEATURES row honestly reads **Complete**.
 | ~~6.2~~ | ~~Move-outs, renewals, and deposit disposition~~ | **Shipped** |
 | ~~6.3~~ | ~~Accounts payable: bills, approval, disbursement~~ | **Shipped** |
 | 6.4 | Bank reconciliation workspace | M |
-| 6.5 | Inspections: schedule, perform, complete | M |
+| ~~6.5~~ | ~~Inspections: schedule, perform, complete~~ | **Shipped** |
 | 6.6 | SCIM 2.0 endpoints and the SSO login routes | M |
 | 6.7 | Bulk import: upload, plan, apply | S |
 | 6.8 | Document extraction review queue | S |

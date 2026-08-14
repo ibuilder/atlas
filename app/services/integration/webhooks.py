@@ -345,9 +345,7 @@ def deliver_due(session: Session, *, org_id: str, limit: int = 100) -> DeliveryO
     return DeliveryOutcome(delivered, failed, dead)
 
 
-def _attempt(
-    delivery: WebhookDelivery, endpoint: WebhookEndpoint, settings
-) -> bool:  # noqa: ANN001
+def _attempt(delivery: WebhookDelivery, endpoint: WebhookEndpoint, settings) -> bool:  # noqa: ANN001
     """Send one delivery. Returns whether the receiver accepted it."""
     body = json.dumps(delivery.payload, separators=(",", ":"), sort_keys=True, default=str)
     started = time.perf_counter()

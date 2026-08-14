@@ -1,0 +1,142 @@
+{# Inspections: booked, running, signed off.
+
+   Booking one takes a template *code*, and the checklist is copied onto the
+   record at whatever version is current at that moment. Editing the template
+   afterwards never changes what a completed inspection appears to have asked.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Inspections · {{ app_name }}{% endblock %}
+{% block heading %}Inspections{% endblock %}
+{% block nav %}{{ admin_nav('inspections') }}{% endblock %}
+
+{% block topbar_meta %}
+{% set running = inspections | selectattr('status', 'equalto', 'in_progress') | list %}
+{% if running %}
+  <span class="integrity">
+    <span class="integrity__dot"></span>
+    {{ running | length }} in progress
+  </span>
+{% endif %}
+<form method="get" class="inline-form">
+  <label class="tiny muted" for="status">Status</label>
+  <select id="status" name="status">
+    <option value="">All</option>
+    {% for value in statuses %}
+      <option value="{{ value }}" {% if status == value %}selected{% endif %}>
+        {{ value | humanize }}
+      </option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn--quiet">Filter</button>
+</form>
+{% endblock %}
+
+{% block content %}
+{% if can('inspection.manage') %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Book an inspection</h2>
+    <span class="panel__hint">
+      The checklist is frozen at the template version used
+    </span>
+  </div>
+
+  <form method="post" action="{{ url_for('admin.inspection_schedule') }}" class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="kind">Kind</label>
+    <select id="kind" name="kind">
+      {% for value in kinds %}
+        <option value="{{ value }}">{{ value | humanize }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="property_id">Property</label>
+    <select id="property_id" name="property_id" required>
+      {% for record in properties.values() %}
+        <option value="{{ record.id }}">{{ record.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="unit_id">Unit</label>
+    <select id="unit_id" name="unit_id">
+      <option value="">Whole property</option>
+      {% for unit in units.values() %}
+        <option value="{{ unit.id }}">{{ unit.unit_number }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="template_code">Checklist</label>
+    <select id="template_code" name="template_code">
+      <option value="">No checklist</option>
+      {% for template in templates %}
+        <option value="{{ template.code }}">
+          {{ template.name }} (v{{ template.version }})
+        </option>
+      {% endfor %}
+    </select>
+
+    <label for="scheduled_for">Scheduled for</label>
+    <input type="datetime-local" id="scheduled_for" name="scheduled_for">
+
+    <button type="submit" class="btn">Book it</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ (status | humanize) if status else 'Everything' }}</h2>
+    <span class="panel__hint">{{ inspections | length }} shown</span>
+  </div>
+
+  {% if inspections %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Number</th><th>Kind</th><th>Where</th><th>Status</th>
+            <th>Scheduled</th><th>Completed</th><th>Result</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in inspections %}
+            {% set property = properties.get(record.property_id) %}
+            {% set unit = units.get(record.unit_id) %}
+            <tr>
+              <td>
+                <a href="{{ url_for('admin.inspection_detail', inspection_id=record.id) }}">
+                  {{ record.inspection_number }}
+                </a>
+              </td>
+              <td class="tiny">{{ record.kind | humanize }}</td>
+              <td class="tiny muted">
+                {{ property.name if property else record.property_id }}
+                {%- if unit %} · {{ unit.unit_number }}{% endif %}
+              </td>
+              <td class="tiny">{{ record.status | humanize }}</td>
+              <td class="tiny muted">
+                {{ record.scheduled_for.date().isoformat() if record.scheduled_for else '—' }}
+              </td>
+              <td class="tiny muted">
+                {{ record.completed_at.date().isoformat() if record.completed_at else '—' }}
+              </td>
+              <td class="tiny">
+                {% if record.result and record.result.value == 'fail' %}
+                  <span class="pill pill--critical">Fail</span>
+                {% elif record.result %}
+                  {{ record.result | humanize }}
+                {% else %}—{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nothing booked.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -24,6 +24,10 @@
     <a class="sidebar__link" href="{{ url_for('admin.applications') }}"
        {% if active == 'applications' %}aria-current="page"{% endif %}>Applications</a>
   {% endif %}
+  {% if can('inspection.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.inspections') }}"
+       {% if active == 'inspections' %}aria-current="page"{% endif %}>Inspections</a>
+  {% endif %}
   {% if can('unit.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.turns') }}"
        {% if active == 'turns' %}aria-current="page"{% endif %}>Turns</a>

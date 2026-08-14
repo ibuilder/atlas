@@ -390,6 +390,229 @@ def ownership() -> str:
     )
 
 
+@admin_bp.get("/inspections")
+@login_required
+def inspections() -> str:
+    """What is booked, what is running, and what has been signed off."""
+    require(Perm.INSPECTION_READ)
+    org_id = require_org_scope()
+
+    from app.models.maintenance import Inspection, InspectionKind
+
+    stmt = select(Inspection).where(Inspection.org_id == org_id)
+    status = (request.args.get("status") or "").strip()
+    if status:
+        stmt = stmt.where(Inspection.status == status)
+
+    records = list(
+        db.session.execute(
+            stmt.order_by(Inspection.scheduled_for.desc().nulls_last()).limit(200)
+        ).scalars()
+    )
+    return render_template(
+        "admin/inspections.html",
+        inspections=records,
+        properties=_properties_by_id(org_id),
+        units=_units_by_id(org_id),
+        templates=_inspection_templates(org_id),
+        kinds=[member.value for member in InspectionKind],
+        status=status,
+        statuses=["scheduled", "in_progress", "completed", "cancelled"],
+    )
+
+
+@admin_bp.get("/inspections/<id:inspection_id>")
+@login_required
+def inspection_detail(inspection_id: str) -> str:
+    """One inspection and its checklist as performed.
+
+    The checklist was copied onto this record at the template version used, so
+    what is shown here is what was actually asked - editing the template since
+    has not rewritten history.
+    """
+    require(Perm.INSPECTION_READ)
+    org_id = require_org_scope()
+
+    from app.models.maintenance import ItemResult
+    from app.services.maintenance.inspections import items_missing_evidence
+
+    record = _inspection_or_404(inspection_id, org_id)
+    items = sorted(record.items, key=lambda item: item.sort_order)
+    return render_template(
+        "admin/inspection.html",
+        inspection=record,
+        items=items,
+        property=db.session.get(Property, record.property_id),
+        unit=db.session.get(Unit, record.unit_id) if record.unit_id else None,
+        unanswered=[item for item in items if item.result is None],
+        # Asked of the service rather than recomputed here: a surface that
+        # reimplements this rule is a surface that will drift from it, and the
+        # drift shows up as a sign-off the page offered and the service refused.
+        missing_photos=items_missing_evidence(current_session(), record),
+        results=[member.value for member in ItemResult],
+    )
+
+
+@admin_bp.post("/inspections")
+@login_required
+def inspection_schedule() -> Response:
+    """Book an inspection, freezing its checklist at the template version used."""
+    require(Perm.INSPECTION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.maintenance import InspectionKind
+    from app.services.maintenance.inspections import current_template, schedule_inspection
+
+    form = request.form
+    back = redirect(url_for("admin.inspections"))
+
+    try:
+        code = (form.get("template_code") or "").strip()
+        scheduled = (form.get("scheduled_for") or "").strip()
+        record = schedule_inspection(
+            current_session(),
+            org_id=org_id,
+            kind=InspectionKind(form.get("kind") or InspectionKind.ROUTINE.value),
+            property_id=form.get("property_id") or "",
+            template=(
+                current_template(current_session(), org_id=org_id, code=code) if code else None
+            ),
+            unit_id=(form.get("unit_id") or "").strip() or None,
+            scheduled_for=dt.datetime.fromisoformat(scheduled) if scheduled else None,
+            inspector_user_id=current_user.id,
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date and time."), "error")
+        return back
+
+    flash(f"Inspection {record.inspection_number} booked.", "success")
+    return redirect(url_for("admin.inspection_detail", inspection_id=record.id))
+
+
+@admin_bp.post("/inspections/<id:inspection_id>/findings")
+@login_required
+def inspection_record(inspection_id: str) -> Response:
+    """Record one observation. Re-recording an item overwrites it."""
+    require(Perm.INSPECTION_PERFORM)
+    org_id = require_org_scope()
+
+    from app.models.maintenance import ItemResult
+    from app.services.maintenance.inspections import (
+        ItemFinding,
+        record_finding,
+        start_inspection,
+    )
+
+    inspection = _inspection_or_404(inspection_id, org_id)
+    back = redirect(url_for("admin.inspection_detail", inspection_id=inspection_id))
+    form = request.form
+
+    try:
+        # Recording the first finding is what "started" means; asking somebody
+        # to press a separate button first is a step nobody would remember.
+        if inspection.status == "scheduled":
+            start_inspection(current_session(), inspection=inspection)
+        record_finding(
+            current_session(),
+            inspection=inspection,
+            finding=ItemFinding(
+                item_id=form.get("item_id") or "",
+                result=ItemResult(form.get("result") or ItemResult.PASS.value),
+                condition=(form.get("condition") or "").strip() or None,
+                notes=(form.get("notes") or "").strip() or None,
+                remedy_cost=_decimal_or_none(form.get("remedy_cost")),
+                is_resident_responsible=bool(form.get("is_resident_responsible")),
+            ),
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a valid finding."), "error")
+        return back
+
+    return back
+
+
+@admin_bp.post("/inspections/<id:inspection_id>/complete")
+@login_required
+def inspection_complete(inspection_id: str) -> Response:
+    """Sign off, and raise work from what failed.
+
+    Refused while any item has no finding, and refused while a failed item that
+    demands a photo has none. Nobody can take that photo retrospectively, which
+    is exactly why the refusal has to land here rather than at a deposit
+    disposition three weeks later.
+    """
+    require(Perm.INSPECTION_PERFORM)
+    org_id = require_org_scope()
+
+    from app.services.maintenance.inspections import (
+        complete_inspection,
+        raise_work_orders_from_findings,
+    )
+
+    inspection = _inspection_or_404(inspection_id, org_id)
+    back = redirect(url_for("admin.inspection_detail", inspection_id=inspection_id))
+
+    try:
+        complete_inspection(
+            current_session(),
+            inspection=inspection,
+            notes=(request.form.get("notes") or "").strip() or None,
+            inspector_signed=bool(request.form.get("inspector_signed")),
+            resident_signed=bool(request.form.get("resident_signed")),
+            actor_id=current_user.id,
+        )
+        raised = raise_work_orders_from_findings(
+            current_session(), inspection=inspection, actor_id=current_user.id
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(
+        f"Signed off as {inspection.result}."
+        + (f" {len(raised)} work order(s) raised." if raised else ""),
+        "success",
+    )
+    return back
+
+
+def _inspection_or_404(inspection_id: str, org_id: str):  # noqa: ANN202 - Inspection
+    from app.models.maintenance import Inspection
+
+    record = db.session.get(Inspection, inspection_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    return record
+
+
+def _inspection_templates(org_id: str) -> list:  # noqa: ANN201 - InspectionTemplate
+    from app.models.maintenance import InspectionTemplate
+
+    return list(
+        db.session.execute(
+            select(InspectionTemplate)
+            .where(InspectionTemplate.org_id == org_id, InspectionTemplate.is_active.is_(True))
+            .order_by(InspectionTemplate.code)
+        ).scalars()
+    )
+
+
+def _properties_by_id(org_id: str) -> dict[str, Property]:
+    return {
+        record.id: record
+        for record in db.session.execute(
+            select(Property).where(Property.org_id == org_id)
+        ).scalars()
+    }
+
+
 @admin_bp.get("/bills")
 @login_required
 def bills() -> str:

@@ -32,7 +32,14 @@ from app.models.leasing import (
     ScreeningRecommendation,
     ScreeningStatus,
 )
-from app.models.maintenance import Priority, RequestStatus, WorkOrderStatus
+from app.models.maintenance import (
+    InspectionKind,
+    InspectionResult,
+    ItemResult,
+    Priority,
+    RequestStatus,
+    WorkOrderStatus,
+)
 from app.models.resident import ResidentStatus, TenancyRole
 from app.schemas.common import (
     AtlasRequest,
@@ -71,6 +78,12 @@ __all__ = [
     "BillOut",
     "BillPaymentOut",
     "BillListQuery",
+    "InspectionSchedule",
+    "FindingIn",
+    "InspectionComplete",
+    "InspectionItemOut",
+    "InspectionOut",
+    "InspectionListQuery",
     "ScreeningOut",
     "ScreeningRecord",
     "ScreeningRequest",
@@ -955,3 +968,82 @@ class BillListQuery(ListQuery):
     property_id: str | None = None
     #: Approved, unpaid, and past due. What the run should be paying today.
     due: bool = False
+
+
+# -------------------------------------------------------------- inspections
+
+
+class InspectionSchedule(AtlasRequest):
+    kind: InspectionKind
+    property_id: str
+    #: The checklist is *copied* onto the inspection at this version. Editing
+    #: the template afterwards must never change what a completed inspection
+    #: appears to have asked.
+    template_code: Annotated[str, StringConstraints(max_length=40)] | None = None
+    unit_id: str | None = None
+    lease_id: str | None = None
+    scheduled_for: dt.datetime | None = None
+    inspector_user_id: str | None = None
+    inspector_vendor_id: str | None = None
+
+
+class FindingIn(AtlasRequest):
+    item_id: str
+    result: ItemResult
+    condition: Annotated[str, StringConstraints(max_length=40)] | None = None
+    severity: Annotated[str, StringConstraints(max_length=40)] | None = None
+    notes: Annotated[str, StringConstraints(max_length=2000)] | None = None
+    #: What it would cost to put right. This is the figure that becomes a
+    #: deposit deduction, so it is recorded at the time it is observed rather
+    #: than invented at settlement.
+    remedy_cost: Decimal | None = Field(default=None, ge=0)
+    is_resident_responsible: bool = False
+
+
+class InspectionComplete(AtlasRequest):
+    notes: Annotated[str, StringConstraints(max_length=4000)] | None = None
+    inspector_signed: bool = False
+    resident_signed: bool = False
+    #: Raise work orders from the failed items in the same call. Idempotent in
+    #: the service, so a retry never raises two jobs for one broken window.
+    raise_work: bool = True
+
+
+class InspectionItemOut(AtlasResponse):
+    id: str
+    section: str
+    name: str
+    sort_order: int
+    result: ItemResult | None = None
+    condition: str | None = None
+    severity: str | None = None
+    notes: str | None = None
+    remedy_cost: Decimal | None = None
+    is_resident_responsible: bool = False
+    requires_photo: bool = False
+    work_order_id: str | None = None
+
+
+class InspectionOut(AtlasResponse):
+    id: str
+    inspection_number: str
+    kind: InspectionKind
+    property_id: str
+    unit_id: str | None = None
+    lease_id: str | None = None
+    status: str
+    scheduled_for: dt.datetime | None = None
+    started_at: dt.datetime | None = None
+    completed_at: dt.datetime | None = None
+    inspector_user_id: str | None = None
+    inspector_vendor_id: str | None = None
+    result: InspectionResult | None = None
+    notes: str | None = None
+    captured_offline: bool = False
+
+
+class InspectionListQuery(ListQuery):
+    status: Annotated[str, StringConstraints(max_length=20)] | None = None
+    kind: InspectionKind | None = None
+    property_id: str | None = None
+    unit_id: str | None = None

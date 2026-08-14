@@ -61,8 +61,7 @@ NO_SURFACE: dict[str, str] = {
         "identity provider has nothing to call."
     ),
     "imports/bulk": (
-        "CSV import with a read-only plan step. The plan is the point and "
-        "nobody can ask for one."
+        "CSV import with a read-only plan step. The plan is the point and nobody can ask for one."
     ),
     "documents/extraction": (
         "Field extraction from uploaded documents, and the accept-or-reject "
@@ -82,11 +81,7 @@ SEED_ONLY: dict[str, str] = {
         "that the capital plan is built on."
     ),
     "assets/spaces": (
-        "The space hierarchy and what is installed in it. The demo builds one; " "nothing else can."
-    ),
-    "maintenance/inspections": (
-        "Scheduling, performing, and completing an inspection, including the "
-        "findings that raise work orders."
+        "The space hierarchy and what is installed in it. The demo builds one; nothing else can."
     ),
 }
 

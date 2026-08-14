@@ -1,4 +1,4 @@
-﻿"""Row-level security: the third isolation layer.
+"""Row-level security: the third isolation layer.
 
 PostgreSQL only. Skipped on SQLite, which has no equivalent â€” and the skip is
 loud rather than silent, because "these tests passed" must never mean "these
@@ -49,19 +49,18 @@ def rls_enabled(pg):
         # does not change that. The CI database user is a superuser, so without
         # a dedicated unprivileged role these tests would pass while proving
         # nothing. This mirrors the deployment requirement in SECURITY.md.
-        connection.execute(text("""
+        connection.execute(
+            text("""
                 DO $$ BEGIN
                     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'atlas_app') THEN
                         CREATE ROLE atlas_app NOLOGIN NOBYPASSRLS;
                     END IF;
                 END $$;
-                """))
+                """)
+        )
         connection.execute(text("GRANT USAGE ON SCHEMA public TO atlas_app"))
         connection.execute(
-            text(
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES "
-                "IN SCHEMA public TO atlas_app"
-            )
+            text("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO atlas_app")
         )
         connection.execute(
             text("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO atlas_app")

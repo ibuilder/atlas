@@ -68,8 +68,7 @@ def breaches(measurements: Iterable[Measurement], *, fail_ratio: float = 0.0) ->
             continue
         if measurement.p95_ms > budget:
             found.append(
-                f"{measurement.name}: P95 {measurement.p95_ms:.0f}ms exceeds "
-                f"the {budget}ms budget"
+                f"{measurement.name}: P95 {measurement.p95_ms:.0f}ms exceeds the {budget}ms budget"
             )
 
     if fail_ratio > MAX_FAIL_RATIO:

@@ -12,6 +12,19 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Inspections are reachable** (ROADMAP 6.5). Booking, recording, and
+  sign-off from `/admin/inspections` and `/api/v1/inspections`; previously only
+  the demo seed could reach any of it. The rule this exists for is evidence: a
+  *failed* item that demands a photo blocks sign-off, and that refusal
+  deliberately lands at the inspection rather than three weeks later at a
+  deposit disposition, because nobody can take the photo retrospectively. A
+  clean pass needs no photo — demanding one of forty working light switches is
+  how a checklist stops being completed honestly.
+- **`items_missing_evidence()` is public** on the inspections service. The
+  console has to show what blocks sign-off *before* the button is pressed, and
+  a surface that reimplements the rule is a surface that will drift from it.
+  One definition, two readers.
+
 - **Accounts payable is reachable** (ROADMAP 6.3). Money coming in had three
   surfaces; money going out had none. Bills, threshold approval, and
   disbursement now run from `/admin/bills` and from `/api/v1/bills`. The rule
