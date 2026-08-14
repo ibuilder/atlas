@@ -52,12 +52,17 @@
 </div>
 {% endif %}
 
-{% if can('ledger.read') or can('audit.read') or can('deposit.read') %}
+{% if can('ledger.read') or can('audit.read') or can('deposit.read')
+      or can('bill.read') %}
 <div class="sidebar__group">
   <div class="sidebar__label">Governance</div>
   {% if can('ledger.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.ledger') }}"
        {% if active == 'ledger' %}aria-current="page"{% endif %}>Ledger</a>
+  {% endif %}
+  {% if can('bill.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.bills') }}"
+       {% if active == 'bills' %}aria-current="page"{% endif %}>Bills</a>
   {% endif %}
   {% if can('deposit.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.deposits') }}"

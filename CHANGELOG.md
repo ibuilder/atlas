@@ -12,6 +12,15 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Accounts payable is reachable** (ROADMAP 6.3). Money coming in had three
+  surfaces; money going out had none. Bills, threshold approval, and
+  disbursement now run from `/admin/bills` and from `/api/v1/bills`. The rule
+  that matters is enforced by identity rather than by role — whoever recorded a
+  bill cannot approve it, however senior — and the bill page states that reason
+  rather than only hiding the button, because a missing control reads as a bug
+  and a stated one reads as a control. Where a bill has changed since it was
+  authorised, the page says so: an approver authorised an amount, not a row.
+
 - **The end of a tenancy is reachable** (ROADMAP 6.2). Renewals, notice,
   move-out, and deposit disposition, from the console at `/admin/leases` and
   `/admin/move-outs` and over the API. Three rules the surfaces carry rather

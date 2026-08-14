@@ -5,7 +5,7 @@ SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 
-from flask import Response
+from flask import Response, request
 from flask_login import current_user
 from sqlalchemy import select
 
@@ -22,6 +22,9 @@ from app.errors import NotFound
 from app.extensions import current_session, db
 from app.middleware import require_org_scope
 from app.models.accounting import (
+    Bill,
+    BillPayment,
+    BillStatus,
     DepositMovement,
     Invoice,
     InvoiceStatus,
@@ -31,6 +34,13 @@ from app.models.accounting import (
 from app.models.leasing import Lease
 from app.models.types import utcnow
 from app.schemas.operations import (
+    BillApproval,
+    BillCreate,
+    BillLineOut,
+    BillListQuery,
+    BillOut,
+    BillPaymentCreate,
+    BillPaymentOut,
     DepositBalanceOut,
     DepositCollect,
     DepositMovementListQuery,
@@ -45,7 +55,7 @@ from app.schemas.operations import (
 )
 from app.security.permissions import Perm
 from app.security.policies import filter_permitted, require
-from app.services.accounting import deposits, ledger, receivables
+from app.services.accounting import deposits, ledger, payables, receivables
 from app.services.common.unit_of_work import transaction
 
 __all__ = []
@@ -345,4 +355,186 @@ def release_deposit() -> Response:
     return respond_created(
         DepositMovementOut.model_validate(movement, from_attributes=True),
         location=f"/api/v1/deposits/{movement.id}",
+    )
+
+
+# ----------------------------------------------------------------- payables
+#
+# Money going out. Two rules here are the whole point of the module and both
+# are enforced by the service rather than by these routes:
+#
+# Whoever recorded a bill cannot approve it, however senior they are.
+# Separation of duties is by identity, not by role — fake-vendor fraud needs
+# one person able to do both halves, and a role check does not stop that.
+#
+# An approval authorises an *amount*, not a row. The approved total is
+# snapshotted, and a bill that has moved since is no longer covered by it.
+
+
+def _bill_or_404(bill_id: str, org_id: str) -> Bill:
+    record = db.session.get(Bill, bill_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("That bill was not found.")
+    return record
+
+
+@api_v1_bp.get("/bills", endpoint="bills_list")
+def list_bills() -> Response:
+    require(Perm.BILL_READ)
+    query = parse_query(BillListQuery)
+    org_id = require_org_scope()
+
+    stmt = select(Bill).where(Bill.org_id == org_id)
+    if query.status:
+        stmt = stmt.where(Bill.status == query.status)
+    if query.vendor_id:
+        stmt = stmt.where(Bill.vendor_id == query.vendor_id)
+    if query.property_id:
+        stmt = stmt.where(Bill.property_id == query.property_id)
+    if query.due:
+        # Approved, still owing, and past due: what a payment run today is for.
+        stmt = stmt.where(
+            Bill.status.in_([BillStatus.APPROVED, BillStatus.PARTIALLY_PAID]),
+            Bill.balance > 0,
+            Bill.due_date <= utcnow().date(),
+        )
+
+    page = paginate(current_session(), stmt, Bill, limit=query.limit, cursor=query.cursor)
+    return respond_collection(page, BillOut)
+
+
+@api_v1_bp.get("/bills/<id:bill_id>", endpoint="bills_get")
+def get_bill(bill_id: str) -> Response:
+    """One bill with its coded lines and what has been paid against it."""
+    require(Perm.BILL_READ)
+    org_id = require_org_scope()
+
+    record = _bill_or_404(bill_id, org_id)
+    payments = list(
+        db.session.execute(
+            select(BillPayment)
+            .where(BillPayment.org_id == org_id, BillPayment.bill_id == bill_id)
+            .order_by(BillPayment.paid_date)
+        ).scalars()
+    )
+    return respond(
+        {
+            **BillOut.model_validate(record, from_attributes=True).model_dump(mode="json"),
+            "lines": [
+                BillLineOut.model_validate(line, from_attributes=True).model_dump(mode="json")
+                for line in record.lines
+            ],
+            "payments": [
+                BillPaymentOut.model_validate(p, from_attributes=True).model_dump(mode="json")
+                for p in payments
+            ],
+            #: Whether this one needs a second person. An unset threshold means
+            #: everything does — a control that vanishes when configuration is
+            #: missing is not a control.
+            "requires_approval": payables.requires_approval(
+                current_session(), org_id=org_id, total=record.total
+            ),
+        }
+    )
+
+
+@api_v1_bp.post("/bills", endpoint="bills_create")
+def create_bill() -> Response:
+    """Record a vendor invoice and post its ledger impact."""
+    require(Perm.BILL_MANAGE)
+    payload = parse_body(BillCreate)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        record = payables.record_bill(
+            session,
+            org_id=org_id,
+            vendor_id=payload.vendor_id,
+            bill_date=payload.bill_date,
+            due_date=payload.due_date,
+            lines=[
+                payables.BillLineInput(
+                    description=line.description,
+                    amount=line.amount,
+                    account_id=line.account_id,
+                    property_id=line.property_id,
+                    unit_id=line.unit_id,
+                    quantity=line.quantity,
+                    is_owner_billable=line.is_owner_billable,
+                )
+                for line in payload.lines
+            ],
+            vendor_invoice_number=payload.vendor_invoice_number,
+            property_id=payload.property_id,
+            work_order_id=payload.work_order_id,
+            memo=payload.memo,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        BillOut.model_validate(record, from_attributes=True),
+        location=f"/api/v1/bills/{record.id}",
+    )
+
+
+@api_v1_bp.post("/bills/<id:bill_id>/approve", endpoint="bills_approve")
+def approve_bill(bill_id: str) -> Response:
+    """Authorise a bill for payment.
+
+    Refused if the caller is the person who recorded it. That check is by
+    identity rather than by role: seniority does not make one person into two.
+    """
+    require(Perm.BILL_APPROVE)
+    payload = parse_body(BillApproval)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        bill = _bill_or_404(bill_id, org_id)
+        record = payables.approve_bill(
+            session, bill=bill, approver_id=current_user.id, note=payload.note
+        )
+
+    return respond(BillOut.model_validate(record, from_attributes=True))
+
+
+@api_v1_bp.post("/bills/<id:bill_id>/payments", endpoint="bill_payments_create")
+def pay_bill(bill_id: str) -> Response:
+    """Disburse against an approved bill."""
+    require(Perm.BILL_PAY)
+    payload = parse_body(BillPaymentCreate)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        bill = _bill_or_404(bill_id, org_id)
+        payment = payables.pay_bill(
+            session,
+            bill=bill,
+            bank_account_id=payload.bank_account_id,
+            amount=payload.amount,
+            paid_date=payload.paid_date,
+            method=payload.method,
+            check_number=payload.check_number,
+            actor_id=current_user.id,
+        )
+
+    return respond_created(
+        BillPaymentOut.model_validate(payment, from_attributes=True),
+        location=f"/api/v1/bills/{bill_id}",
+    )
+
+
+@api_v1_bp.get("/payables/outstanding", endpoint="payables_outstanding")
+def outstanding_payable() -> Response:
+    """What is owed, in total or to one vendor."""
+    require(Perm.BILL_READ)
+    org_id = require_org_scope()
+    vendor_id = request.args.get("vendor_id")
+
+    return respond(
+        {
+            "vendor_id": vendor_id,
+            "outstanding": str(
+                payables.outstanding_payable(current_session(), org_id=org_id, vendor_id=vendor_id)
+            ),
+        }
     )

@@ -1,0 +1,175 @@
+{# One bill, and the two people it takes to pay it.
+
+   The approval button is hidden from whoever recorded the bill. That hiding is
+   courtesy — the service refuses it either way — but the refusal is worth
+   explaining on the page rather than only in a flash message, because the
+   reader's next question is otherwise "why can't I?".
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ bill.bill_number }} · {{ app_name }}{% endblock %}
+{% block heading %}Bill {{ bill.bill_number }}{% endblock %}
+{% block nav %}{{ admin_nav('bills') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if bill.status.value == 'void' %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span> Void</span>
+{% elif bill.balance > 0 and bill.due_date < today %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span>
+    {{ (today - bill.due_date).days }} days overdue</span>
+{% else %}
+  <span class="integrity"><span class="integrity__dot"></span>
+    {{ bill.status | humanize }}</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ vendor.name if vendor else bill.vendor_id }}</h2>
+    <span class="panel__hint">
+      {{ bill.bill_date.isoformat() }} · due {{ bill.due_date.isoformat() }}
+      {%- if bill.vendor_invoice_number %} · their ref {{ bill.vendor_invoice_number }}{% endif %}
+    </span>
+  </div>
+  <p class="tiny">
+    <strong>{{ bill.total | money }}</strong> total,
+    <strong>{{ bill.balance | money }}</strong> still owing.
+    {% if bill.approved_at %}
+      Approved {{ bill.approved_at.date().isoformat() }}
+      {%- if bill.approved_total is not none and bill.approved_total != bill.total %}
+        {# The approver authorised an amount, not a row. #}
+        <span class="pill pill--critical">
+          approved at {{ bill.approved_total | money }}, since changed
+        </span>
+      {%- endif %}.
+    {% endif %}
+  </p>
+  {% if bill.memo %}<p class="tiny muted">{{ bill.memo }}</p>{% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Lines</h2>
+    <span class="panel__hint">{{ bill.lines | length }} coded</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>#</th><th>Description</th><th>Account</th>
+            <th>Owner billable</th><th class="num">Amount</th></tr>
+      </thead>
+      <tbody>
+        {% for line in bill.lines %}
+          <tr>
+            <td class="num tiny muted">{{ line.line_number }}</td>
+            <td>{{ line.description }}</td>
+            <td class="tiny muted">{{ line.account_id }}</td>
+            <td class="tiny">{{ 'Yes' if line.is_owner_billable else 'Absorbed' }}</td>
+            <td class="num">{{ line.amount | money }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if bill.status.value == 'pending_approval' %}
+  <div class="panel">
+    <div class="panel__head">
+      <h2 class="panel__title">Approval</h2>
+      <span class="panel__hint">
+        {% if needs_approval %}
+          Over the threshold, or no threshold is set
+        {% else %}
+          Under the approval threshold
+        {% endif %}
+      </span>
+    </div>
+
+    {% if is_own_bill %}
+      <p class="empty">
+        You recorded this bill, so you cannot approve it. Separation of duties
+        is by identity rather than by role: fake-vendor fraud needs one person
+        able to do both halves, and seniority does not make one person into two.
+      </p>
+    {% elif can('bill.approve') %}
+      <form method="post"
+            action="{{ url_for('admin.bill_approve', bill_id=bill.id) }}" class="stack">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="note">Note</label>
+        <input type="text" id="note" name="note" maxlength="500"
+               placeholder="Matches the quote and the completed work order">
+        <button type="submit" class="btn">Approve {{ bill.total | money }}</button>
+      </form>
+    {% else %}
+      <p class="empty">This bill is waiting on somebody who can approve it.</p>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Payments</h2>
+    <span class="panel__hint">{{ payments | length }}</span>
+  </div>
+
+  {% if payments %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Paid</th><th>Method</th><th>Reference</th><th class="num">Amount</th></tr>
+        </thead>
+        <tbody>
+          {% for payment in payments %}
+            <tr {% if payment.voided_at %}class="muted"{% endif %}>
+              <td class="tiny">{{ payment.paid_date.isoformat() }}</td>
+              <td class="tiny">{{ payment.method | humanize }}</td>
+              <td class="tiny muted">
+                {{ payment.check_number or '—' }}
+                {%- if payment.voided_at %} <span class="pill">voided</span>{% endif %}
+              </td>
+              <td class="num">{{ payment.amount | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nothing has been disbursed.</p>
+  {% endif %}
+
+  {% if can('bill.pay') and bill.balance > 0
+        and bill.status.value in ('approved', 'partially_paid') %}
+    <form method="post"
+          action="{{ url_for('admin.bill_pay', bill_id=bill.id) }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="bank_account_id">From</label>
+      <select id="bank_account_id" name="bank_account_id" required>
+        {% for account in bank_accounts %}
+          <option value="{{ account.id }}">{{ account.name }}</option>
+        {% endfor %}
+      </select>
+      <label for="amount">Amount</label>
+      <input type="text" id="amount" name="amount" inputmode="decimal" required
+             value="{{ bill.balance }}">
+      <label for="paid_date">Paid on</label>
+      <input type="date" id="paid_date" name="paid_date" required>
+      <label for="method">Method</label>
+      <select id="method" name="method">
+        <option value="check">Check</option>
+        <option value="ach">ACH</option>
+        <option value="wire">Wire</option>
+        <option value="card">Card</option>
+        <option value="cash">Cash</option>
+      </select>
+      <label for="check_number">Check or reference number</label>
+      <input type="text" id="check_number" name="check_number" maxlength="40">
+      <button type="submit" class="btn">Disburse</button>
+    </form>
+  {% endif %}
+</div>
+
+<p class="tiny"><a href="{{ url_for('admin.bills') }}">Back to bills</a></p>
+{% endblock %}

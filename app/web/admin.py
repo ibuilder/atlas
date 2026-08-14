@@ -390,6 +390,167 @@ def ownership() -> str:
     )
 
 
+@admin_bp.get("/bills")
+@login_required
+def bills() -> str:
+    """The payables queue: what is waiting on an approver, and what is due."""
+    require(Perm.BILL_READ)
+    org_id = require_org_scope()
+
+    from app.models.accounting import Bill, BillStatus
+    from app.models.vendor import Vendor
+
+    today = utcnow().date()
+    stmt = select(Bill).where(Bill.org_id == org_id)
+    status = (request.args.get("status") or "").strip()
+    if status in {member.value for member in BillStatus}:
+        stmt = stmt.where(Bill.status == status)
+
+    records = list(db.session.execute(stmt.order_by(Bill.due_date.asc()).limit(200)).scalars())
+    return render_template(
+        "admin/bills.html",
+        bills=records,
+        vendors={
+            vendor.id: vendor
+            for vendor in db.session.execute(
+                select(Vendor).where(Vendor.org_id == org_id)
+            ).scalars()
+        },
+        awaiting=[b for b in records if b.status == BillStatus.PENDING_APPROVAL],
+        due=[
+            b
+            for b in records
+            if b.status in (BillStatus.APPROVED, BillStatus.PARTIALLY_PAID)
+            and b.balance > Decimal("0")
+            and b.due_date <= today
+        ],
+        status=status,
+        statuses=[member.value for member in BillStatus],
+        today=today,
+    )
+
+
+@admin_bp.get("/bills/<id:bill_id>")
+@login_required
+def bill_detail(bill_id: str) -> str:
+    """One bill, its coded lines, and what has been disbursed against it."""
+    require(Perm.BILL_READ)
+    org_id = require_org_scope()
+
+    from app.models.accounting import BankAccount, BillPayment
+    from app.models.vendor import Vendor
+    from app.services.accounting.payables import requires_approval
+
+    record = _bill_or_404(bill_id, org_id)
+    return render_template(
+        "admin/bill.html",
+        bill=record,
+        vendor=db.session.get(Vendor, record.vendor_id),
+        payments=list(
+            db.session.execute(
+                select(BillPayment)
+                .where(BillPayment.org_id == org_id, BillPayment.bill_id == bill_id)
+                .order_by(BillPayment.paid_date)
+            ).scalars()
+        ),
+        bank_accounts=list(
+            db.session.execute(
+                select(BankAccount).where(
+                    BankAccount.org_id == org_id, BankAccount.is_trust.is_(False)
+                )
+            ).scalars()
+        ),
+        # An unset threshold means everything needs a second person. A control
+        # that disappears when configuration is missing is not a control.
+        needs_approval=requires_approval(current_session(), org_id=org_id, total=record.total),
+        # Whoever recorded it cannot approve it, and the page should not offer
+        # a button the service is going to refuse.
+        is_own_bill=record.created_by_id == current_user.id,
+        today=utcnow().date(),
+    )
+
+
+@admin_bp.post("/bills/<id:bill_id>/approve")
+@login_required
+def bill_approve(bill_id: str) -> Response:
+    """Authorise a bill for payment.
+
+    The service refuses an approver who is the bill's author. That is by
+    identity, not by role: fake-vendor fraud needs one person able to do both
+    halves, and no amount of seniority makes one person into two.
+    """
+    require(Perm.BILL_APPROVE)
+    org_id = require_org_scope()
+
+    from app.services.accounting.payables import approve_bill
+
+    bill = _bill_or_404(bill_id, org_id)
+    back = redirect(url_for("admin.bill_detail", bill_id=bill_id))
+
+    try:
+        approve_bill(
+            current_session(),
+            bill=bill,
+            approver_id=current_user.id,
+            note=(request.form.get("note") or "").strip() or None,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(f"Approved {bill.total} for payment.", "success")
+    return back
+
+
+@admin_bp.post("/bills/<id:bill_id>/payments")
+@login_required
+def bill_pay(bill_id: str) -> Response:
+    """Disburse against an approved bill."""
+    require(Perm.BILL_PAY)
+    org_id = require_org_scope()
+
+    from app.models.accounting import PaymentMethod
+    from app.services.accounting.payables import pay_bill
+
+    bill = _bill_or_404(bill_id, org_id)
+    back = redirect(url_for("admin.bill_detail", bill_id=bill_id))
+    form = request.form
+
+    try:
+        amount = _decimal_or_none(form.get("amount"))
+        if amount is None:
+            raise ValidationFailed("A payment needs an amount.")
+        pay_bill(
+            current_session(),
+            bill=bill,
+            bank_account_id=form.get("bank_account_id") or "",
+            amount=amount,
+            paid_date=dt.date.fromisoformat(form.get("paid_date") or ""),
+            method=PaymentMethod(form.get("method") or PaymentMethod.CHECK.value),
+            check_number=(form.get("check_number") or "").strip() or None,
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date or an amount."), "error")
+        return back
+
+    flash(f"Paid. {bill.balance} still owing.", "success")
+    return back
+
+
+def _bill_or_404(bill_id: str, org_id: str):  # noqa: ANN202 - Bill
+    from app.models.accounting import Bill
+
+    record = db.session.get(Bill, bill_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    return record
+
+
 @admin_bp.get("/leases")
 @login_required
 def leases() -> str:

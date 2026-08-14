@@ -121,6 +121,10 @@ def seed_demo(slug: str, force: bool) -> None:
         f"  Tenancy      : {operations['tenancy_endings']} endings "
         "(one renewal on offer, one deposit settled in time)"
     )
+    click.echo(
+        f"  Bills        : {operations['bills']} "
+        "(one paid, one approved and due, one blocked on its author)"
+    )
     _print_credentials(slug)
 
 

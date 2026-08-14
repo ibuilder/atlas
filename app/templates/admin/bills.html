@@ -1,0 +1,127 @@
+{# The payables queue.
+
+   Two counts lead, because they are the two questions an accounts department
+   is actually asked: what is blocked on somebody's approval, and what has to
+   leave the bank today.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Bills · {{ app_name }}{% endblock %}
+{% block heading %}Bills{% endblock %}
+{% block nav %}{{ admin_nav('bills') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if awaiting %}
+  <span class="integrity">
+    <span class="integrity__dot"></span>
+    {{ awaiting | length }} awaiting approval
+  </span>
+{% endif %}
+{% if due %}
+  <span class="integrity integrity--broken">
+    <span class="integrity__dot"></span>
+    {{ due | length }} due now
+  </span>
+{% endif %}
+<form method="get" class="inline-form">
+  <label class="tiny muted" for="status">Status</label>
+  <select id="status" name="status">
+    <option value="">All</option>
+    {% for value in statuses %}
+      <option value="{{ value }}" {% if status == value %}selected{% endif %}>
+        {{ value | humanize }}
+      </option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn--quiet">Filter</button>
+</form>
+{% endblock %}
+
+{% block content %}
+{% if due %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Approved and due</h2>
+    <span class="panel__hint">
+      {{ due | sum(attribute='balance') | money }} to disburse
+    </span>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>Bill</th><th>Vendor</th><th>Due</th>
+            <th class="num">Days</th><th class="num">Owing</th></tr>
+      </thead>
+      <tbody>
+        {% for bill in due %}
+          {% set vendor = vendors.get(bill.vendor_id) %}
+          <tr>
+            <td>
+              <a href="{{ url_for('admin.bill_detail', bill_id=bill.id) }}">
+                {{ bill.bill_number }}
+              </a>
+            </td>
+            <td class="tiny">{{ vendor.name if vendor else bill.vendor_id }}</td>
+            <td class="tiny">{{ bill.due_date.isoformat() }}</td>
+            <td class="num">
+              <span class="pill pill--critical">{{ (today - bill.due_date).days }}d</span>
+            </td>
+            <td class="num">{{ bill.balance | money }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ (status | humanize) if status else 'Every bill' }}</h2>
+    <span class="panel__hint">{{ bills | length }} shown</span>
+  </div>
+
+  {% if bills %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Bill</th><th>Vendor</th><th>Invoice</th><th>Status</th>
+            <th>Dated</th><th>Due</th><th class="num">Total</th><th class="num">Owing</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for bill in bills %}
+            {% set vendor = vendors.get(bill.vendor_id) %}
+            <tr>
+              <td>
+                <a href="{{ url_for('admin.bill_detail', bill_id=bill.id) }}">
+                  {{ bill.bill_number }}
+                </a>
+              </td>
+              <td class="tiny">{{ vendor.name if vendor else bill.vendor_id }}</td>
+              <td class="tiny muted">{{ bill.vendor_invoice_number or '—' }}</td>
+              <td class="tiny">
+                {% if bill.status.value == 'pending_approval' %}
+                  <span class="pill">Awaiting approval</span>
+                {% elif bill.status.value == 'void' %}
+                  <span class="muted">Void</span>
+                {% else %}
+                  {{ bill.status | humanize }}
+                {% endif %}
+              </td>
+              <td class="tiny muted">{{ bill.bill_date.isoformat() }}</td>
+              <td class="tiny muted">{{ bill.due_date.isoformat() }}</td>
+              <td class="num">{{ bill.total | money }}</td>
+              <td class="num">{{ bill.balance | money }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No bills{% if status %} {{ status | humanize | lower }}{% endif %}.</p>
+  {% endif %}
+</div>
+{% endblock %}

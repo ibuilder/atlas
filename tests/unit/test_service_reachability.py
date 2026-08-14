@@ -56,10 +56,6 @@ NOT_A_SURFACE = {
 #: them. These are whole capabilities that exist in the codebase and not in the
 #: product.
 NO_SURFACE: dict[str, str] = {
-    "accounting/payables": (
-        "Bills: recording, threshold approval routing, and disbursement. "
-        "Money going out has no surface; money coming in has three."
-    ),
     "iam/scim": (
         "Directory provisioning, which is HTTP endpoints by definition - an "
         "identity provider has nothing to call."

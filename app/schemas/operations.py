@@ -12,6 +12,7 @@ from typing import Annotated, Any
 from pydantic import Field, StringConstraints, model_validator
 
 from app.models.accounting import (
+    BillStatus,
     DepositMovementKind,
     InvoiceStatus,
     PaymentMethod,
@@ -62,6 +63,14 @@ __all__ = [
     "DepositSettlement",
     "MoveOutOut",
     "MoveOutListQuery",
+    "BillLineIn",
+    "BillCreate",
+    "BillApproval",
+    "BillPaymentCreate",
+    "BillLineOut",
+    "BillOut",
+    "BillPaymentOut",
+    "BillListQuery",
     "ScreeningOut",
     "ScreeningRecord",
     "ScreeningRequest",
@@ -848,3 +857,101 @@ class MoveOutListQuery(ListQuery):
     #: Only those whose statutory deadline has passed unsettled. Past this
     #: date the deductions are usually forfeit, often with a penalty on top.
     overdue: bool = False
+
+
+# ----------------------------------------------------------------- payables
+
+
+class BillLineIn(AtlasRequest):
+    description: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)
+    ]
+    amount: Decimal = Field(gt=0)
+    account_id: str
+    property_id: str | None = None
+    unit_id: str | None = None
+    quantity: Decimal = Field(default=Decimal("1"), gt=0)
+    #: Whether this line reaches an owner statement. Default true; a line the
+    #: operator is absorbing is the exception and has to say so.
+    is_owner_billable: bool = True
+
+
+class BillCreate(AtlasRequest):
+    vendor_id: str
+    bill_date: dt.date
+    due_date: dt.date
+    lines: list[BillLineIn] = Field(min_length=1, max_length=200)
+    vendor_invoice_number: Annotated[str, StringConstraints(max_length=80)] | None = None
+    property_id: str | None = None
+    work_order_id: str | None = None
+    memo: Annotated[str, StringConstraints(max_length=2000)] | None = None
+
+    @model_validator(mode="after")
+    def _dates_make_sense(self) -> BillCreate:
+        if self.due_date < self.bill_date:
+            raise ValueError("the due date cannot precede the bill date")
+        return self
+
+
+class BillApproval(AtlasRequest):
+    note: Annotated[str, StringConstraints(max_length=500)] | None = None
+
+
+class BillPaymentCreate(AtlasRequest):
+    bank_account_id: str
+    amount: Decimal = Field(gt=0)
+    paid_date: dt.date
+    method: PaymentMethod = PaymentMethod.CHECK
+    check_number: Annotated[str, StringConstraints(max_length=40)] | None = None
+
+
+class BillLineOut(AtlasResponse):
+    id: str
+    line_number: int
+    account_id: str
+    property_id: str | None = None
+    unit_id: str | None = None
+    description: str
+    quantity: Decimal
+    amount: Decimal
+    is_owner_billable: bool
+
+
+class BillOut(AtlasResponse):
+    id: str
+    bill_number: str
+    vendor_id: str
+    vendor_invoice_number: str | None = None
+    bill_date: dt.date
+    due_date: dt.date
+    status: BillStatus
+    property_id: str | None = None
+    work_order_id: str | None = None
+    total: Decimal
+    balance: Decimal
+    approved_at: dt.datetime | None = None
+    approved_by_id: str | None = None
+    #: What was actually authorised. Approving *this* bill is not the same as
+    #: approving whatever it later becomes, so the figure is snapshotted.
+    approved_total: Decimal | None = None
+    memo: str | None = None
+    is_1099_reportable: bool = False
+
+
+class BillPaymentOut(AtlasResponse):
+    id: str
+    bill_id: str
+    bank_account_id: str
+    amount: Decimal
+    paid_date: dt.date
+    method: PaymentMethod
+    check_number: str | None = None
+    voided_at: dt.datetime | None = None
+
+
+class BillListQuery(ListQuery):
+    status: BillStatus | None = None
+    vendor_id: str | None = None
+    property_id: str | None = None
+    #: Approved, unpaid, and past due. What the run should be paying today.
+    due: bool = False

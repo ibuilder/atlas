@@ -61,6 +61,7 @@ def seed_operations(organization, properties, units, leases, vendor, users, acco
     summary["envelopes"] = _seed_esign(organization, leases, users)
     summary["applications"] = _seed_applications(organization, properties[0], units, users)
     summary["tenancy_endings"] = _seed_tenancy_endings(organization, leases, accounts, users)
+    summary["bills"] = _seed_payables(organization, vendor, accounts, users)
 
     db.session.flush()
     return summary
@@ -1351,3 +1352,100 @@ def _seed_tenancy_endings(organization, leases, accounts, users) -> int:  # noqa
 
     db.session.flush()
     return 2
+
+
+def _seed_payables(organization, vendor, accounts, users) -> int:  # noqa: ANN001
+    """Three bills: one paid, one approved and due, one blocked on approval.
+
+    The blocked one is recorded by the accountant on purpose. Signing in as
+    that accountant and finding the approve button gone - with the reason
+    stated - is the only way the separation-of-duties rule is visible in a demo
+    at all.
+    """
+    from sqlalchemy import select
+
+    from app.models.accounting import BankAccount
+    from app.services.accounting.chart import AccountCode
+    from app.services.accounting.payables import (
+        BillLineInput,
+        approve_bill,
+        pay_bill,
+        record_bill,
+    )
+
+    session = current_session()
+    clerk = users["accountant"]
+    controller = users["controller"]
+    operating = (
+        session.execute(
+            select(BankAccount).where(
+                BankAccount.org_id == organization.id, BankAccount.is_trust.is_(False)
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+    def _bill(description, amount, days_ago, account_code, invoice):  # noqa: ANN001, ANN202
+        bill = record_bill(
+            session,
+            org_id=organization.id,
+            vendor_id=vendor.id,
+            bill_date=TODAY - dt.timedelta(days=days_ago),
+            due_date=TODAY - dt.timedelta(days=days_ago) + dt.timedelta(days=30),
+            lines=[
+                BillLineInput(
+                    description=description,
+                    amount=amount,
+                    account_id=accounts[account_code].id,
+                )
+            ],
+            vendor_invoice_number=invoice,
+            actor_id=clerk.id,
+        )
+        # The separation rule reads created_by_id, and the seed runs as the
+        # system rather than as a person - so attribution has to be stated.
+        bill.created_by_id = clerk.id
+        session.flush()
+        return bill
+
+    settled = _bill(
+        "Boiler service, Harrow Court",
+        Decimal("640.00"),
+        75,
+        AccountCode.REPAIRS_MAINTENANCE,
+        "NPS-20418",
+    )
+    approve_bill(session, bill=settled, approver_id=controller.id, note="Matches the work order.")
+    if operating is not None:
+        pay_bill(
+            session,
+            bill=settled,
+            bank_account_id=operating.id,
+            amount=settled.total,
+            paid_date=TODAY - dt.timedelta(days=50),
+            check_number="10418",
+            actor_id=controller.id,
+        )
+
+    due = _bill(
+        "Landscaping, quarterly",
+        Decimal("1180.00"),
+        40,
+        AccountCode.REPAIRS_MAINTENANCE,
+        "NPS-20502",
+    )
+    approve_bill(session, bill=due, approver_id=controller.id)
+
+    # Left pending on purpose, and recorded by the accountant, so the demo can
+    # show the refusal rather than describe it.
+    _bill(
+        "Roof inspection and flashing repair",
+        Decimal("3450.00"),
+        6,
+        AccountCode.REPAIRS_MAINTENANCE,
+        "NPS-20577",
+    )
+
+    db.session.flush()
+    return 3
