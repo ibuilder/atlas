@@ -36,6 +36,20 @@ codes and the `/api/v1` namespace are already treated as stable.
   table and the guard now have to agree.
 - **`ROADMAP.md` gains 0.6.0 — "Make it operable"**, which is those surfaces and
   nothing else. No new domain logic; the domain logic is already written.
+- **`flask atlas create-org`.** Writing the deployment guide exposed that a
+  real deployment could not be provisioned at all: the only way to create an
+  organization was `flask seed demo`, which creates accounts with a published
+  password, and `create-admin` needs an organization to put the administrator
+  in. It now provisions the tenant, its roles, and its chart of accounts.
+- **`docs/DOMAIN.md`** — what the records mean and which invariants are
+  load-bearing, for somebody who has to change them. Each section ends with what
+  breaks if the rule is ignored, because that is the part worth remembering.
+- **`DEPLOYMENT.md`** — what it needs, what production refuses to boot on, the
+  database role (a superuser bypasses row-level security *unconditionally*),
+  first run, health and metrics, scheduled work, upgrades, and a closing section
+  on what the deployment deliberately does not do for you.
+- **`tests/unit/test_documentation.py`** keeps both honest: every documented CLI
+  command, setting, scheduled job, metric, and relative link has to exist.
 - The demo seeds message threads, two turns, and two signature envelopes — one
   executed, one waiting in the resident's portal, because a completed envelope
   demonstrates the record but not the act. One thread is internal and anchored

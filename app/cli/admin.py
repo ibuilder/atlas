@@ -56,6 +56,48 @@ def verify_audit(org_slug: str) -> None:
         )
 
 
+@admin_cli.command("create-org")
+@click.option("--name", required=True, help="Display name, e.g. 'Northlight Property Group'.")
+@click.option("--slug", required=True, help="Alphanumeric with hyphens; used in URLs.")
+@click.option("--legal-name", default=None, help="Registered name, where it differs.")
+@click.option("--timezone", default="America/New_York", show_default=True)
+@click.option("--currency", default="USD", show_default=True)
+def create_org(name: str, slug: str, legal_name: str | None, timezone: str, currency: str) -> None:
+    """Create an organization and provision its roles.
+
+    The first thing a real deployment needs, and until now the only way to do it
+    was ``flask seed demo`` - which creates accounts with a published password.
+    A production instance had no honest way to provision its first tenant.
+    """
+    from app.context import system_context, use_context
+    from app.extensions import current_session
+    from app.services.accounting.chart import seed_chart_of_accounts
+    from app.services.iam.provisioning import create_organization
+
+    with use_context(system_context("cli")):
+        organization = create_organization(
+            current_session(),
+            name=name,
+            slug=slug,
+            legal_name=legal_name,
+            timezone=timezone,
+            currency=currency,
+        )
+        db.session.commit()
+
+    # The chart is tenant data, so it is seeded under the new organization's own
+    # scope rather than the one that created it.
+    with use_context(system_context("cli", org_id=organization.id)):
+        accounts = seed_chart_of_accounts(current_session(), organization.id)
+        db.session.commit()
+
+    click.echo(f"Created {organization.name} ({organization.slug}).")
+    click.echo("  Roles    : provisioned from the system role definitions")
+    click.echo(f"  Accounts : {len(accounts)} in the chart of accounts")
+    click.echo("")
+    click.echo(f"  Next: flask atlas create-admin --org {organization.slug} --email … --name …")
+
+
 @admin_cli.command("create-admin")
 @click.option("--org", "org_slug", required=True)
 @click.option("--email", required=True)
