@@ -178,6 +178,15 @@ ignore_missing_imports = true
 plugins = []
 exclude = ["migrations/", "build/", "\\.venv/"]
 
+#: `ignore_missing_imports` above is for third-party packages that ship no
+#: stubs. Applied to our own code it silently accepts an import of a module
+#: that does not exist - which is how `from app.models.assets import Space`
+#: type-checked clean against a package that only has `asset_graph`. Turned
+#: back off for first-party imports, where a missing module is a typo.
+[[tool.mypy.overrides]]
+module = "app.*"
+ignore_missing_imports = false
+
 [[tool.mypy.overrides]]
 module = "tests.*"
 check_untyped_defs = false

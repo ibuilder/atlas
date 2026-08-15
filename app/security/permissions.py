@@ -594,6 +594,11 @@ SYSTEM_ROLES: Final[tuple[RoleDef, ...]] = (
             Perm.VENDOR_READ,
             Perm.AUDIT_READ,
             Perm.PORTFOLIO_READ,
+            # Editing a property, which now includes mapping its spaces. This
+            # grant was defined and held by nobody, so the permission existed
+            # and could not be exercised - the roles console surfaces exactly
+            # that case, and this is one it was pointing at.
+            Perm.PROPERTY_UPDATE,
         },
     ),
     RoleDef(

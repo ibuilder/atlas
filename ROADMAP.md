@@ -184,9 +184,13 @@ build if the list grows; `docs/FEATURES.md` marks them **No surface**. This
 milestone is the surfaces, and nothing else — no new domain logic, because the
 domain logic is already written and already covered.
 
-The sequencing is by consequence rather than by size. Each item is done when the
-capability can be exercised end to end by a signed-in human, its module leaves
-the reachability list, and its FEATURES row honestly reads **Complete**.
+**0.6.0 is complete.** Every item below shipped. `NO_SURFACE` and `SEED_ONLY`
+in `tests/unit/test_service_reachability.py` are both empty, and no
+`docs/FEATURES.md` row carries the **No surface** status.
+
+The sequencing was by consequence rather than by size. Each item was done when
+the capability could be exercised end to end by a signed-in human, its module
+left the reachability list, and its FEATURES row honestly read **Complete**.
 
 | # | Item | Size |
 |---|---|---|
@@ -198,7 +202,7 @@ the reachability list, and its FEATURES row honestly reads **Complete**.
 | ~~6.6~~ | ~~SCIM 2.0 endpoints and the SSO login routes~~ | **Shipped** |
 | ~~6.7~~ | ~~Bulk import: upload, plan, apply~~ | **Shipped** |
 | ~~6.8~~ | ~~Document extraction review queue~~ | **Shipped** |
-| 6.9 | Spaces and asset lifecycle management | M |
+| ~~6.9~~ | ~~Spaces and asset lifecycle management~~ | **Shipped** |
 
 **6.1 — shipped.** The funnel used to stop at leads, which made the several
 services behind it — consent before screening, criteria snapshotted at the

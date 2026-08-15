@@ -12,6 +12,19 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Spaces and asset lifecycle are reachable** (ROADMAP 6.9), the last two
+  modules the demo seed alone could drive. The space tree is mapped from a
+  property's page and rolls area up — a floor's area is the rooms on it — and a
+  move into a space's own subtree is refused, because every roll-up walks that
+  tree and one loop hangs the page reporting it. `/admin/assets` shows the
+  repair-or-replace call *with* the three numbers behind it rather than instead
+  of them, and retiring keeps the record: that history is the evidence behind
+  this replacement decision and the next one for the same model.
+- **0.6.0 is complete.** Every service module now has a surface a signed-in
+  person can reach; `NO_SURFACE` and `SEED_ONLY` in the reachability guard are
+  both empty, and no `docs/FEATURES.md` row carries the **No surface** status.
+  The status stays defined because the guard is what keeps it empty.
+
 - **The extraction review queue is reachable** (ROADMAP 6.8) at
   `/admin/extractions` and over the API. Readings are shown beside the text
   they were read from — a confidence score with nothing behind it just moves
@@ -242,6 +255,19 @@ codes and the `/api/v1` namespace are already treated as stable.
   rather than aspirational.
 
 ### Fixed
+
+- **`PROPERTY_UPDATE` was a permission no role held.** It was defined,
+  described, and ungrantable — so gating space management on it locked
+  everybody out. The roles console surfaces exactly this case ("permissions no
+  role holds"); this was one it had been pointing at. Now held by property
+  managers.
+- **mypy accepted imports of first-party modules that do not exist.**
+  `ignore_missing_imports = true` was set globally, which is right for
+  third-party packages without stubs and wrong for our own: `from
+  app.models.assets import Space` type-checked clean against a package that
+  only has `asset_graph`. Scoped off for `app.*`, and turning it off
+  immediately surfaced a second real bug — `Asset.condition_rating`, which is
+  `condition_score`.
 
 - **`docs/FEATURES.md` claimed OIDC sign-on was Complete before the routes
   existed.** The reachability guard passed it because a nightly job imports the

@@ -19,6 +19,19 @@ build when a module becomes unreachable without being recorded, and again when
 a recorded one is fixed and the entry is left behind. The table below and that
 file have to agree.
 
+**As of 0.6.0 no row carries that status.** Every service module has a surface
+a signed-in person can reach. The status stays defined because the guard is
+what keeps it empty — the next capability written service-first will land here
+until somebody gives it a way in.
+
+> **What the guard cannot see.** It measures *module* reachability, which is
+> coarser than it looks. OIDC single sign-on read **Complete** for months while
+> `/auth/sso/...` did not exist, because a nightly job imports the module to
+> purge expired login states — one imported function makes the whole module
+> look reached. A per-function version would catch that and is a much larger
+> change. Until then, a module whose only caller is a background job wants a
+> manual look rather than the benefit of the doubt.
+
 ---
 
 ## Platform
@@ -68,14 +81,6 @@ file have to agree.
 | Renewals, move-outs, deposit disposition | **Complete** | Reachable from the console at `/admin/leases` and `/admin/move-outs`, and over the API. A renewal's terms are fixed when offered - a resident who accepts is accepting that offer, not whatever the asking rent has become - and a lapsed offer cannot be honoured. The statutory disposition clock starts when the move-out is recorded and the deadline is stored on the record rather than recomputed on read, so it does not drift when somebody changes the setting. The disposition settles against what was actually collected, taken from the deposit subledger, which is a different number from the contracted figure wherever a deposit was waived, part-paid, or replaced by a rider. Deductions prefer a completed inspection as their source; withholding more than is held is refused as a claim against the resident rather than a disposition. The board leads with what is overdue, because past the deadline the deductions are usually forfeit entirely. |
 | E-sign | **Complete** | The envelope lifecycle behind a provider adapter, reachable from all three portals: a signer sees what is waiting for them, is shown the consent wording, and types their name - which is what makes the stored consent record evidence rather than a field. Staff raise, send, and void through `/api/v1/envelopes` behind `esign.manage`; signing needs no permission, because a signer is authorised by being named on the envelope. The document's SHA-256 is pinned at send and re-checked before completion, so a file swapped underneath an open envelope voids it. Completion requires *every* signer, and an hourly sweep lapses envelopes nobody completed. Simple electronic signature, not qualified - see ADR-0008. |
 
-> **What the reachability guard cannot see.** OIDC sign-on read **Complete**
-> here while `/auth/sso/...` did not exist. `tests/unit/test_service_reachability.py`
-> passed it because a nightly job imports `iam/oidc` to purge expired login
-> states — module-level reachability, which is all the guard measures. A module
-> one job touches for one function counts as reached even when the capability
-> the module is named for has no way in. Treat a `Complete` on a module that is
-> only imported by a job as a claim to check by hand.
-
 ## Accounting
 
 | Capability | Status | Notes |
@@ -124,9 +129,9 @@ file have to agree.
 | Quarantine and scanning | **Complete** | Quarantine on arrival, scan, release or hold, failing closed when the scanner is unreachable. The reference deployment runs ClamAV and the application waits on its health check rather than releasing unscanned files; `flask atlas verify-scanner` proves it end to end with EICAR and refuses to pass a scanner that did not answer. The structural scanner remains the default for development and says plainly that it is not a virus scanner. |
 | Signed expiring retrieval | **Complete** | Time-limited tokens, attributable to the actor they were issued to, refused for quarantined objects. |
 | Retention and legal hold | **Complete** | Retention derived from document category; a hold outranks every rule. |
-| Space hierarchy | **No surface** | Site / building / floor / unit / room / riser, nestable, with assets located in it and area rolled up. Exercised only by the demo seed; there is no way to build or amend a hierarchy from the product. |
+| Space hierarchy | **Complete** | Mapped from a property's page at `/admin/properties/<id>/spaces`. Site / building / floor / unit / room / riser, nestable, with assets located in it. Area rolls up: a floor's area is the rooms on it, and reporting the floor's own figure as the total is how square footage quietly halves. A move into a space's own subtree is refused — a cycle here is not untidiness, because every roll-up walks this tree and one loop hangs the page that reports it. Nesting is capped at twelve levels. |
 | Document intelligence | **Complete** | The review queue is at `/admin/extractions`, with the same operations over the API. Lease, invoice, and insurance-certificate extraction as *suggestions* a person accepts, never as facts: the accept is the only path from extracted text to a value the system will act on, and it carries the reviewer's name so "why does it say this?" answers with a person and a sentence. Each reading is shown beside the text it was read from, because a confidence score with nothing behind it just moves the guess from the machine to the reader. The value is editable in the accept form rather than behind a separate correct-this action — the common case is a right field with a misread digit, and forcing a reject-then-retype loses the evidence link. Fields looked for and *not* found are named, since a missing field is as wrong as a bad one and much easier to overlook. The queue is ordered by lowest confidence, so the readings the machine got wrong are the ones a reviewer reaches first. Accepting needs `document.extraction_review`, which is not `document.upload`: a technician photographing a broken window is a reasonable grant, and accepting an extracted lease rent is a financial decision. |
-| Asset registry, warranties, service history | **No surface** | Warranty is resolved when work is raised rather than looked up afterwards, and service history drives repair-or-replace. Reachable only from the demo seed. |
+| Asset registry, warranties, service history | **Complete** | `/admin/assets`, worst condition first. Warranty is resolved when work is raised rather than looked up afterwards, and a repair already paid for can be marked recoverable later — the discovery usually happens after the invoice. The asset's aggregates (service count, lifetime cost, condition, last serviced) are derived from the service events rather than maintained separately, so they cannot disagree with the history they summarise. The repair-or-replace call is shown with the three numbers that produced it, not instead of them: on its own the recommendation is worth little, and the numbers are what turn "it keeps breaking" into something a budget meeting can act on. Retiring keeps the record, because that history is the evidence behind this replacement decision and behind the next one for the same model. |
 | Repair-or-replace advice | **Complete** | Computed from cumulative repair cost against replacement cost, repeat failures in twelve months, expected life, and last recorded condition. One signal is "assess"; two are "replace". The recommendation matters less than the numbers behind it, which are returned with it. |
 | Capital planning | **Complete** | Multi-year replacement forecast that starts from expected life and then *moves* on observed condition and failure history, and reports which it used. A missing replacement cost is stated rather than contributing zero to a budget. Costs inflate forward at a stated rate. Assets beyond the horizon are dropped rather than piled into the final year, which would show a cliff that is not there. Available as a report. |
 

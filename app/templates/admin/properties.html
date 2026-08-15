@@ -27,7 +27,7 @@
         <thead>
           <tr>
             <th>Code</th><th>Name</th><th>Type</th><th>Address</th>
-            <th class="num">Units</th><th>Status</th>
+            <th class="num">Units</th><th>Status</th><th></th>
           </tr>
         </thead>
         <tbody>
@@ -39,6 +39,11 @@
               <td class="truncate muted small">{{ property.display_address }}</td>
               <td class="num">{{ property.total_units }}</td>
               <td>{{ property.status | status_pill }}</td>
+              <td class="tiny">
+                <a href="{{ url_for('admin.property_spaces', property_id=property.id) }}">
+                  Spaces
+                </a>
+              </td>
             </tr>
           {% endfor %}
         </tbody>

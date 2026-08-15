@@ -1,0 +1,85 @@
+{# The asset register, worst condition first.
+
+   Retired assets are hidden by default and never deleted: their service
+   history is the evidence behind the replacement decision, and behind the next
+   one for the same model.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Assets · {{ app_name }}{% endblock %}
+{% block heading %}Assets{% endblock %}
+{% block nav %}{{ admin_nav('assets') }}{% endblock %}
+
+{% block topbar_meta %}
+{% set poor = assets | selectattr('condition_score') | selectattr('condition_score', 'le', 2) | list %}
+{% if poor %}
+  <span class="integrity integrity--broken">
+    <span class="integrity__dot"></span>
+    {{ poor | length }} in poor condition
+  </span>
+{% endif %}
+<form method="get" class="inline-form">
+  <label class="tiny muted" for="status">Status</label>
+  <select id="status" name="status">
+    <option value="">In service</option>
+    {% for value in statuses %}
+      <option value="{{ value }}" {% if status == value %}selected{% endif %}>
+        {{ value | humanize }}
+      </option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="btn btn--quiet">Filter</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ (status | humanize) if status else 'In service' }}</h2>
+    <span class="panel__hint">{{ assets | length }} shown</span>
+  </div>
+
+  {% if assets %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Asset</th><th>Property</th><th>Status</th>
+            <th class="num">Condition</th><th class="num">Lifetime cost</th><th>Last serviced</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for asset in assets %}
+            {% set property = properties.get(asset.property_id) %}
+            <tr>
+              <td>
+                <a href="{{ url_for('admin.asset_detail', asset_id=asset.id) }}">
+                  {{ asset.name }}
+                </a>
+              </td>
+              <td class="tiny muted">{{ property.name if property else '—' }}</td>
+              <td class="tiny">{{ asset.status | humanize }}</td>
+              <td class="num">
+                {% if asset.condition_score is none %}
+                  <span class="muted">—</span>
+                {% elif asset.condition_score <= 2 %}
+                  <span class="pill pill--critical">{{ asset.condition_score }}/5</span>
+                {% else %}
+                  {{ asset.condition_score }}/5
+                {% endif %}
+              </td>
+              <td class="num">{{ asset.lifetime_service_cost | money }}</td>
+              <td class="tiny muted">
+                {{ asset.last_serviced_on.isoformat() if asset.last_serviced_on else 'never' }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No assets{% if status %} {{ status | humanize | lower }}{% endif %}.</p>
+  {% endif %}
+</div>
+{% endblock %}

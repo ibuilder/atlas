@@ -1,0 +1,206 @@
+{# One asset: warranty, history, and the repair-or-replace call.
+
+   The recommendation is shown with the three numbers that produced it, not
+   instead of them. On its own it is worth little; the numbers are what turn
+   "it keeps breaking" into something a budget meeting can act on.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ asset.name }} · {{ app_name }}{% endblock %}
+{% block heading %}{{ asset.name }}{% endblock %}
+{% block nav %}{{ admin_nav('assets') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if warranty.covered %}
+  <span class="integrity"><span class="integrity__dot"></span> Under warranty</span>
+{% elif advice.recommendation == 'replace' %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span>
+    Replace</span>
+{% else %}
+  <span class="integrity"><span class="integrity__dot"></span>
+    {{ asset.status | humanize }}</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ asset.category | humanize }}</h2>
+    <span class="panel__hint">
+      {%- if asset.manufacturer %}{{ asset.manufacturer }}{% endif %}
+      {%- if asset.model %} {{ asset.model }}{% endif %}
+      {%- if asset.installed_on %} · installed {{ asset.installed_on.isoformat() }}{% endif %}
+    </span>
+  </div>
+  <p class="tiny">
+    Condition
+    <strong>{{ asset.condition_score if asset.condition_score is not none else '—' }}/5</strong>
+    · {{ asset.service_count }} service{{ '' if asset.service_count == 1 else 's' }}
+    · <strong>{{ asset.lifetime_service_cost | money }}</strong> spent to date
+    {%- if asset.replacement_cost %}
+      · {{ asset.replacement_cost | money }} to replace
+    {%- endif %}
+  </p>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Warranty</h2>
+    <span class="panel__hint">
+      {{ 'Covered today' if warranty.covered else 'Not covered' }}
+    </span>
+  </div>
+  <p class="tiny muted">{{ warranty.reason }}</p>
+  {% if warranty.covered and not warranty.claimable_labor %}
+    <p class="tiny">
+      <span class="pill">Parts only</span>
+      Labour is not covered, so a claim will not cover the whole invoice.
+    </p>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Repair or replace</h2>
+    <span class="panel__hint">Advisory — {{ advice.recommendation | humanize }}</span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data">
+      <tbody>
+        <tr>
+          <td>Spent on it so far</td>
+          <td class="num">{{ advice.lifetime_cost | money }}</td>
+        </tr>
+        <tr>
+          <td>Cost to replace</td>
+          <td class="num">
+            {{ advice.replacement_cost | money if advice.replacement_cost else 'not recorded' }}
+          </td>
+        </tr>
+        <tr>
+          <td>Spent as a share of replacement</td>
+          <td class="num">
+            {% if advice.cost_ratio is not none %}
+              {{ (advice.cost_ratio * 100) | round(1) }}%
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>Failures in the last year</td>
+          <td class="num">{{ advice.failures_last_year }}</td>
+        </tr>
+        <tr>
+          <td>Past its expected life</td>
+          <td class="num">{{ 'Yes' if advice.past_expected_life else 'No' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  {% if advice.reasons %}
+    <ul>
+      {% for reason in advice.reasons %}<li class="tiny">{{ reason }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Service history</h2>
+    <span class="panel__hint">{{ history | length }} recorded</span>
+  </div>
+
+  {% if history %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Date</th><th>What</th><th class="num">Cost</th>
+              <th class="num">Condition after</th><th>Warranty</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for event in history %}
+            <tr>
+              <td class="tiny">{{ event.performed_on.isoformat() }}</td>
+              <td class="tiny">
+                {{ event.event_type | humanize }}
+                {%- if event.notes %} <span class="muted">— {{ event.notes }}</span>{% endif %}
+              </td>
+              <td class="num">{{ event.cost | money }}</td>
+              <td class="num">
+                {{ event.condition_after if event.condition_after is not none else '—' }}
+              </td>
+              <td class="tiny">
+                {% if event.was_under_warranty %}
+                  recoverable
+                {% elif can('asset.manage') and event.cost > 0 %}
+                  {# The discovery usually happens later: somebody notices the
+                     unit was still covered when the invoice was paid. #}
+                  <form method="post" class="inline-form"
+                        action="{{ url_for('admin.asset_event_warranty', event_id=event.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn--quiet">Claimable?</button>
+                  </form>
+                {% else %}—{% endif %}
+              </td>
+              <td></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">Nothing has been recorded against this asset.</p>
+  {% endif %}
+
+  {% if can('asset.manage') and asset.status.value != 'retired' %}
+    <form method="post"
+          action="{{ url_for('admin.asset_record_service', asset_id=asset.id) }}" class="stack">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label for="event_type">What happened</label>
+      <select id="event_type" name="event_type">
+        {% for value in event_types %}
+          <option value="{{ value }}">{{ value | humanize }}</option>
+        {% endfor %}
+      </select>
+      <label for="performed_on">On</label>
+      <input type="date" id="performed_on" name="performed_on"
+             value="{{ today.isoformat() }}" max="{{ today.isoformat() }}" required>
+      <label for="cost">Cost</label>
+      <input type="text" id="cost" name="cost" inputmode="decimal" value="0.00">
+      <label for="condition_after">Condition after, 1 to 5</label>
+      <input type="number" id="condition_after" name="condition_after" min="1" max="5">
+      <label for="notes">Notes</label>
+      <input type="text" id="notes" name="notes" maxlength="500">
+      <button type="submit" class="btn">Record it</button>
+    </form>
+  {% endif %}
+</div>
+
+{% if can('asset.manage') and asset.status.value != 'retired' %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Retire</h2>
+    <span class="panel__hint">Kept, not deleted</span>
+  </div>
+  <p class="tiny muted">
+    The history above is the evidence behind this decision and behind the next
+    one for the same model, so retiring keeps the record rather than removing
+    it.
+  </p>
+  <form method="post" action="{{ url_for('admin.asset_retire', asset_id=asset.id) }}"
+        class="stack">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="retired_on">Retired on</label>
+    <input type="date" id="retired_on" name="retired_on" value="{{ today.isoformat() }}">
+    <label for="reason">Why</label>
+    <input type="text" id="reason" name="reason" maxlength="255" required
+           placeholder="Compressor failed for the third time in ten months">
+    <button type="submit" class="btn btn--quiet">Retire it</button>
+  </form>
+</div>
+{% endif %}
+
+<p class="tiny"><a href="{{ url_for('admin.assets') }}">Back to assets</a></p>
+{% endblock %}

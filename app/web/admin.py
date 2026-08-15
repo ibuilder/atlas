@@ -399,6 +399,323 @@ def ownership() -> str:
     )
 
 
+@admin_bp.get("/properties/<id:property_id>/spaces")
+@login_required
+def property_spaces(property_id: str) -> str:
+    """The space hierarchy of one property, and what is installed in it.
+
+    Shown as a tree rather than a list because the nesting *is* the
+    information: a riser that serves four floors is a different thing from a
+    riser that happens to be on one.
+    """
+    require(Perm.PROPERTY_READ)
+    org_id = require_org_scope()
+
+    from app.models.asset_graph import SpaceKind
+    from app.services.assets.spaces import assets_in, rolled_up_area, space_tree
+
+    record = db.session.get(Property, property_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+
+    tree = space_tree(current_session(), org_id=org_id, property_id=property_id)
+    flattened = []
+    for root in tree:
+        for node in root.walk():
+            flattened.append(
+                {
+                    "space": node.space,
+                    "depth": len([parent for parent in _space_ancestors(node.space)]),
+                    # Own area plus everything under it. A floor's area is the
+                    # rooms on it, and reporting the floor's own number as the
+                    # total is how square footage quietly halves.
+                    "area": rolled_up_area(current_session(), space=node.space),
+                    "assets": assets_in(
+                        current_session(), space=node.space, include_descendants=False
+                    ),
+                }
+            )
+
+    return render_template(
+        "admin/spaces.html",
+        property=record,
+        rows=flattened,
+        kinds=[member.value for member in SpaceKind],
+        units=list(
+            db.session.execute(
+                select(Unit).where(Unit.org_id == org_id, Unit.property_id == property_id)
+            ).scalars()
+        ),
+    )
+
+
+@admin_bp.post("/properties/<id:property_id>/spaces")
+@login_required
+def property_space_create(property_id: str) -> Response:
+    """Add a space, optionally under another."""
+    require(Perm.PROPERTY_UPDATE)
+    org_id = require_org_scope()
+
+    from app.models.asset_graph import Space, SpaceKind
+    from app.services.assets.spaces import create_space
+
+    record = db.session.get(Property, property_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    back = redirect(url_for("admin.property_spaces", property_id=property_id))
+    form = request.form
+
+    try:
+        parent_id = (form.get("parent_space_id") or "").strip()
+        parent = db.session.get(Space, parent_id) if parent_id else None
+        if parent is not None and parent.org_id != org_id:
+            abort(404)
+        create_space(
+            current_session(),
+            org_id=org_id,
+            property_id=property_id,
+            code=(form.get("code") or "").strip(),
+            name=(form.get("name") or "").strip(),
+            kind=SpaceKind(form.get("kind") or SpaceKind.ROOM.value),
+            parent=parent,
+            unit_id=(form.get("unit_id") or "").strip() or None,
+            area_sqft=_decimal_or_none(form.get("area_sqft")),
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a valid space."), "error")
+        return back
+
+    flash("Space added.", "success")
+    return back
+
+
+@admin_bp.post("/spaces/<id:space_id>/move")
+@login_required
+def space_move(space_id: str) -> Response:
+    """Re-parent a space.
+
+    The service refuses a move into a space's own subtree. A cycle here is not
+    a validation nicety: every roll-up walks this tree, and one loop hangs the
+    page that reports it.
+    """
+    require(Perm.PROPERTY_UPDATE)
+    org_id = require_org_scope()
+
+    from app.models.asset_graph import Space
+    from app.services.assets.spaces import move_space
+
+    space = db.session.get(Space, space_id)
+    if space is None or space.org_id != org_id:
+        abort(404)
+    back = redirect(url_for("admin.property_spaces", property_id=space.property_id))
+
+    try:
+        target_id = (request.form.get("new_parent_id") or "").strip()
+        target = db.session.get(Space, target_id) if target_id else None
+        if target is not None and target.org_id != org_id:
+            abort(404)
+        move_space(current_session(), space=space, new_parent=target)
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Space moved.", "success")
+    return back
+
+
+@admin_bp.get("/assets")
+@login_required
+def assets() -> str:
+    """Every asset, worst condition first."""
+    require(Perm.ASSET_READ)
+    org_id = require_org_scope()
+
+    from app.models.asset_graph import Asset, AssetStatus
+
+    stmt = select(Asset).where(Asset.org_id == org_id)
+    status = (request.args.get("status") or "").strip()
+    if status in {member.value for member in AssetStatus}:
+        stmt = stmt.where(Asset.status == status)
+    elif not status:
+        stmt = stmt.where(Asset.status != AssetStatus.RETIRED)
+
+    records = list(
+        db.session.execute(
+            stmt.order_by(Asset.condition_score.asc().nulls_last()).limit(200)
+        ).scalars()
+    )
+    return render_template(
+        "admin/assets.html",
+        assets=records,
+        properties=_properties_by_id(org_id),
+        status=status,
+        statuses=[member.value for member in AssetStatus],
+    )
+
+
+@admin_bp.get("/assets/<id:asset_id>")
+@login_required
+def asset_detail(asset_id: str) -> str:
+    """One asset: its warranty, its history, and the repair-or-replace call.
+
+    The recommendation is worth little on its own; the three numbers behind it
+    are worth a lot, because they turn "it keeps breaking" into something a
+    budget meeting can act on.
+    """
+    require(Perm.ASSET_READ)
+    org_id = require_org_scope()
+
+    from app.models.asset_graph import AssetServiceEvent, ServiceEventType
+    from app.services.assets.lifecycle import check_warranty, repair_or_replace
+
+    asset = _asset_or_404(asset_id, org_id)
+    return render_template(
+        "admin/asset.html",
+        asset=asset,
+        warranty=check_warranty(current_session(), asset=asset),
+        advice=repair_or_replace(current_session(), asset=asset),
+        history=list(
+            db.session.execute(
+                select(AssetServiceEvent)
+                .where(
+                    AssetServiceEvent.org_id == org_id,
+                    AssetServiceEvent.asset_id == asset_id,
+                )
+                .order_by(AssetServiceEvent.performed_on.desc())
+            ).scalars()
+        ),
+        event_types=[member.value for member in ServiceEventType],
+        today=utcnow().date(),
+    )
+
+
+@admin_bp.post("/assets/<id:asset_id>/service")
+@login_required
+def asset_record_service(asset_id: str) -> Response:
+    """Record what happened to it.
+
+    The asset's aggregates - service count, lifetime cost, condition - are
+    derived here from the event rather than maintained separately, so they
+    cannot disagree with the history they summarise.
+    """
+    require(Perm.ASSET_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.asset_graph import ServiceEventType
+    from app.services.assets.lifecycle import record_service
+
+    asset = _asset_or_404(asset_id, org_id)
+    back = redirect(url_for("admin.asset_detail", asset_id=asset_id))
+    form = request.form
+
+    try:
+        condition = (form.get("condition_after") or "").strip()
+        record_service(
+            current_session(),
+            asset=asset,
+            event_type=ServiceEventType(form.get("event_type") or ServiceEventType.REPAIR.value),
+            performed_on=dt.date.fromisoformat(form.get("performed_on") or ""),
+            cost=_decimal_or_none(form.get("cost")) or Decimal("0"),
+            condition_after=int(condition) if condition else None,
+            notes=(form.get("notes") or "").strip() or None,
+            performed_by_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date, an amount, or a condition."), "error")
+        return back
+
+    flash("Service recorded.", "success")
+    return back
+
+
+@admin_bp.post("/asset-events/<id:event_id>/warranty")
+@login_required
+def asset_event_warranty(event_id: str) -> Response:
+    """Mark a repair already paid for as recoverable.
+
+    Separate from recording it, because the discovery usually happens later —
+    somebody notices the unit was still covered. The audit event says plainly
+    that money was spent on covered work, which is the part worth noticing.
+    """
+    require(Perm.ASSET_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.asset_graph import AssetServiceEvent
+    from app.services.assets.lifecycle import recover_under_warranty
+
+    event = db.session.get(AssetServiceEvent, event_id)
+    if event is None or event.org_id != org_id:
+        abort(404)
+    back = redirect(url_for("admin.asset_detail", asset_id=event.asset_id))
+
+    try:
+        recover_under_warranty(current_session(), event=event, actor_id=current_user.id)
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Marked as recoverable under warranty.", "success")
+    return back
+
+
+@admin_bp.post("/assets/<id:asset_id>/retire")
+@login_required
+def asset_retire(asset_id: str) -> Response:
+    """Take it out of service.
+
+    Retired rather than deleted: its service history is the evidence behind
+    this replacement decision, and behind the next one for the same model.
+    """
+    require(Perm.ASSET_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.assets.lifecycle import retire_asset
+
+    asset = _asset_or_404(asset_id, org_id)
+    back = redirect(url_for("admin.asset_detail", asset_id=asset_id))
+
+    try:
+        retired_on = (request.form.get("retired_on") or "").strip()
+        retire_asset(
+            current_session(),
+            asset=asset,
+            retired_on=dt.date.fromisoformat(retired_on) if retired_on else None,
+            reason=request.form.get("reason") or "",
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except (AtlasError, ValueError) as exc:
+        db.session.rollback()
+        flash(_said(exc, "That is not a date."), "error")
+        return back
+
+    flash("Retired.", "success")
+    return back
+
+
+def _asset_or_404(asset_id: str, org_id: str):  # noqa: ANN202 - Asset
+    from app.models.asset_graph import Asset
+
+    record = db.session.get(Asset, asset_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+    return record
+
+
+def _space_ancestors(space):  # noqa: ANN001, ANN202 - list[Space]
+    from app.services.assets.spaces import ancestors
+
+    return ancestors(current_session(), space=space)
+
+
 @admin_bp.get("/extractions")
 @login_required
 def extractions() -> str:

@@ -67,15 +67,7 @@ NO_SURFACE: dict[str, str] = {}
 
 #: Reachable only from the demo seed. Better than nothing - the code has run
 #: against realistic data - and still not a way for a user to get there.
-SEED_ONLY: dict[str, str] = {
-    "assets/lifecycle": (
-        "Service history, warranty recovery, and the repair-or-replace call "
-        "that the capital plan is built on."
-    ),
-    "assets/spaces": (
-        "The space hierarchy and what is installed in it. The demo builds one; nothing else can."
-    ),
-}
+SEED_ONLY: dict[str, str] = {}
 
 
 def _module_key(path: pathlib.Path) -> str:
