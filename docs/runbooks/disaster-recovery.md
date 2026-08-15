@@ -119,11 +119,12 @@ DATABASE_URL=postgresql://.../atlas_restored alembic upgrade head
 ### 4. Verify — this is the part that matters
 
 ```bash
-DATABASE_URL=postgresql://.../atlas_restored python -m scripts.verify_restore
+DATABASE_URL=postgresql://.../atlas_restored flask --app wsgi atlas verify-restore
 ```
 
-`scripts/verify_restore.py` checks four things, and a restore is not complete
-until all four pass:
+It checks four things, and a restore is not complete until all four pass.
+Exits non-zero on any failure, so it can gate a cut-over rather than being
+read and nodded at:
 
 1. **The encryption key is the right one.** Decrypts a known encrypted column.
    A wrong key fails here rather than silently returning ciphertext.
