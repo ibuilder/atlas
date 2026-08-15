@@ -287,9 +287,12 @@ portfolio on this:
       timing table in that runbook filled in. Written is not executed, and the
       drill is the point.
 - [ ] **Load tested** to the stated budgets: P95 < 300ms reads, < 700ms writes.
-      Needs production-shaped hardware and data volumes. The harness exists and
-      fails the run on a breach — see [tests/load/](tests/load/README.md) — so
-      what is missing is somewhere to run it, not something to run. The verdict
+      Needs production-shaped hardware. The harness exists and fails the run on
+      a breach, and `flask seed load` now generates production-shaped *data* —
+      skewed rather than uniform, deterministic so two runs compare, and
+      verified against the ledger and audit invariants its bulk inserts bypass.
+      See [tests/load/](tests/load/README.md). What is missing is now only
+      somewhere to run it. The verdict
       logic is now separated from the locust profile and covered by the ordinary
       suite (`tests/unit/test_load_budgets.py`), because it previously could not
       be imported without locust installed and had therefore never executed —

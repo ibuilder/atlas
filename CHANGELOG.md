@@ -12,6 +12,17 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **`flask seed load`**, a production-shaped data generator for load testing.
+  Not the demo seed with a bigger number: deliberately *skewed*, because a
+  uniform database measures an index that behaves nothing like production and
+  the long tail is where the slow queries live. Deterministic, so two runs
+  produce the same database and two results are comparable. It bulk-inserts for
+  speed, which goes around the ledger's balance invariant and the audit chain —
+  so it verifies both afterwards and refuses to finish if either fails, because
+  a load test against a database that is quietly not Atlas-shaped measures the
+  wrong system convincingly. 100 properties gives 5.3k units, 58k invoices,
+  227k ledger lines and 58k audit events in about 90 seconds.
+
 - **Spaces and asset lifecycle are reachable** (ROADMAP 6.9), the last two
   modules the demo seed alone could drive. The space tree is mapped from a
   property's page and rolls area up — a floor's area is the rooms on it — and a
