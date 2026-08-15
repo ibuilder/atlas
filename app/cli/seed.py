@@ -125,6 +125,7 @@ def seed_demo(slug: str, force: bool) -> None:
         f"  Bills        : {operations['bills']} "
         "(one paid, one approved and due, one blocked on its author)"
     )
+    click.echo(f"  Extractions  : {operations['extractions']} documents read, nothing accepted yet")
     _print_credentials(slug)
 
 

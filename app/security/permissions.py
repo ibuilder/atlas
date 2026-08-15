@@ -138,6 +138,12 @@ class Perm:
     # -- documents --------------------------------------------------------
     DOCUMENT_READ = "document.read"
     DOCUMENT_UPLOAD = "document.upload"
+    #: Turning a machine's reading of a document into a value the system will
+    #: act on. Deliberately not DOCUMENT_UPLOAD: a technician uploading a photo
+    #: of a broken window is a reasonable grant, and accepting an extracted
+    #: lease rent or invoice total is a financial decision. Same document, two
+    #: very different authorities.
+    DOCUMENT_EXTRACTION_REVIEW = "document.extraction_review"
     DOCUMENT_DELETE = "document.delete"
     DOCUMENT_SHARE = "document.share"
     #: Raising and withdrawing envelopes. Signing needs no permission - a signer
@@ -306,6 +312,12 @@ PERMISSION_CATALOG: Final[tuple[PermissionDef, ...]] = (
     # documents
     _p(Perm.DOCUMENT_READ, "View documents", "Documents"),
     _p(Perm.DOCUMENT_UPLOAD, "Upload documents", "Documents"),
+    _p(
+        Perm.DOCUMENT_EXTRACTION_REVIEW,
+        "Accept extracted values",
+        "Documents",
+        sensitive=True,
+    ),
     _p(Perm.DOCUMENT_DELETE, "Delete documents", "Documents", sensitive=True),
     _p(Perm.DOCUMENT_SHARE, "Share documents externally", "Documents", sensitive=True),
     _p(Perm.ESIGN_MANAGE, "Send documents for signature", "Documents", sensitive=True),
@@ -396,6 +408,7 @@ _LEASING_OPERATIONS = frozenset(
         Perm.MESSAGE_SEND,
         Perm.DOCUMENT_READ,
         Perm.DOCUMENT_UPLOAD,
+        Perm.DOCUMENT_EXTRACTION_REVIEW,
         Perm.ESIGN_MANAGE,
         Perm.PROPERTY_READ,
         Perm.UNIT_READ,
@@ -458,6 +471,7 @@ _ACCOUNTING_OPERATIONS = frozenset(
         Perm.VENDOR_READ,
         Perm.DOCUMENT_READ,
         Perm.DOCUMENT_UPLOAD,
+        Perm.DOCUMENT_EXTRACTION_REVIEW,
         Perm.REPORT_READ,
         Perm.REPORT_RUN,
     }

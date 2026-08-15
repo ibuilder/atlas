@@ -54,8 +54,12 @@ __all__ = [
     "Extraction",
     "Suggestion",
     "accept_suggestion",
+    "accepted_values",
     "extract",
+    "extraction_for",
+    "is_reviewable",
     "known_extractors",
+    "record_decisions",
     "reject_suggestion",
 ]
 
@@ -551,3 +555,115 @@ def accepted_values(extraction: Extraction) -> dict[str, Any]:
         for suggestion in extraction.suggestions
         if suggestion.accepted_at is not None
     }
+
+
+# ---------------------------------------------------------------------------
+# Making a review durable
+# ---------------------------------------------------------------------------
+#
+# An `Extraction` is a pure function of the document's text, so it is derived
+# on demand rather than stored. What has to survive is the *decisions* — which
+# field a person accepted, at what value, and which they threw out. Those live
+# on ``Document.extracted``.
+#
+# Deriving rather than storing is the safer half of that split: a stored
+# extraction can disagree with the document it came from after a re-OCR, and
+# nobody would notice. A derived one cannot.
+
+
+def _kind_for(document: Document) -> str:
+    """Which extractor this document's category calls for."""
+    from app.models.documents import DocumentCategory
+
+    return {
+        DocumentCategory.LEASE: "lease",
+        DocumentCategory.INVOICE: "invoice",
+        DocumentCategory.INSURANCE: "certificate",
+    }.get(document.category, "")
+
+
+def is_reviewable(document: Document) -> bool:
+    """Whether there is anything here a person could review.
+
+    Text and a category we have an extractor for. A document with neither is
+    not a failure, it is simply not this queue's business.
+    """
+    return bool(document.ocr_text) and _kind_for(document) in EXTRACTORS
+
+
+def extraction_for(document: Document) -> Extraction:
+    """This document's suggestions, with the decisions already taken applied.
+
+    Re-read from the text every time. The alternative — storing the extraction
+    — lets it drift from the document after a re-OCR without anybody noticing,
+    and a suggestion that no longer matches its evidence is worse than none.
+    """
+    kind = _kind_for(document)
+    if not kind:
+        raise ValidationFailed(f"There is no extractor for a {document.category} document.")
+    if not document.ocr_text:
+        raise ValidationFailed(
+            "This document has no text yet. Extraction runs on what OCR produced."
+        )
+
+    result = extract(document.ocr_text, kind=kind, document=document)
+    decisions = dict(document.extracted or {})
+
+    for suggestion in result.suggestions:
+        recorded = decisions.get(suggestion.field)
+        if not isinstance(recorded, dict):
+            continue
+        if recorded.get("rejected_at"):
+            suggestion.rejected_at = _as_datetime(recorded["rejected_at"])
+            continue
+        if recorded.get("accepted_at"):
+            suggestion.accepted_at = _as_datetime(recorded["accepted_at"])
+            suggestion.accepted_by_id = recorded.get("accepted_by_id")
+            # The value a person settled on, which may not be what was read.
+            if "value" in recorded:
+                suggestion.value = recorded["value"]
+    return result
+
+
+def record_decisions(document: Document, extraction: Extraction) -> dict[str, Any]:
+    """Write the decisions back onto the document.
+
+    Values are stored as text. A JSON column cannot hold a ``Decimal`` or a
+    ``date`` without silently becoming a float or an ISO string anyway, and
+    choosing the representation here beats discovering it on the way out.
+    """
+    decided: dict[str, Any] = dict(document.extracted or {})
+
+    for suggestion in extraction.suggestions:
+        if suggestion.accepted_at is not None:
+            decided[suggestion.field] = {
+                "value": str(suggestion.value),
+                "accepted_at": suggestion.accepted_at.isoformat(),
+                "accepted_by_id": suggestion.accepted_by_id,
+                "confidence": suggestion.confidence,
+                "evidence": suggestion.evidence[:255],
+            }
+        elif suggestion.rejected_at is not None:
+            decided[suggestion.field] = {
+                "rejected_at": suggestion.rejected_at.isoformat(),
+                "confidence": suggestion.confidence,
+            }
+
+    document.extracted = decided
+    # A whole-document figure the queue can sort by: the lowest confidence
+    # among what is still undecided, because that is the row a reviewer should
+    # reach first. Nothing left to decide reads as fully confident.
+    pending = [s for s in extraction.suggestions if s.is_pending]
+    document.extraction_confidence = (
+        int(min(s.confidence for s in pending) * 100) if pending else 100
+    )
+    return decided
+
+
+def _as_datetime(value: Any) -> dt.datetime | None:
+    if isinstance(value, dt.datetime):
+        return value
+    try:
+        return dt.datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        return None

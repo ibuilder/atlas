@@ -63,12 +63,7 @@ NOT_A_SURFACE = {
 #: Implemented and tested, with no route, view, command, or job that reaches
 #: them. These are whole capabilities that exist in the codebase and not in the
 #: product.
-NO_SURFACE: dict[str, str] = {
-    "documents/extraction": (
-        "Field extraction from uploaded documents, and the accept-or-reject "
-        "review that decides what is believed."
-    ),
-}
+NO_SURFACE: dict[str, str] = {}
 
 #: Reachable only from the demo seed. Better than nothing - the code has run
 #: against realistic data - and still not a way for a user to get there.

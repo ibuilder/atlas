@@ -37,11 +37,12 @@ from app.schemas.operations import (
     EnvelopeOut,
     EnvelopeSignerOut,
     EnvelopeVoid,
+    ExtractionDecision,
 )
 from app.security.permissions import Perm
 from app.security.policies import require
 from app.services.common.unit_of_work import transaction
-from app.services.documents import esign
+from app.services.documents import esign, extraction
 from app.services.documents import service as documents
 
 __all__ = []
@@ -369,3 +370,101 @@ def void_signature_envelope(envelope_id: str) -> Response:
         )
 
     return respond(EnvelopeOut.model_validate(record, from_attributes=True))
+
+
+# -------------------------------------------------------------- extraction
+#
+# Extraction produces *suggestions*, and the only path from a suggestion to a
+# value the system will act on is a person accepting it. That accept is
+# attributed and audited, so "why does it say this?" answers with a name and a
+# sentence rather than a shrug.
+#
+# The extraction itself is derived from the document's text on every call
+# rather than stored. A stored one drifts from the document after a re-OCR
+# without anybody noticing, and a suggestion that no longer matches its
+# evidence is worse than no suggestion at all.
+
+
+@api_v1_bp.get("/documents/<id:document_id>/extraction", endpoint="documents_extraction_get")
+def get_extraction(document_id: str) -> Response:
+    """What this document appears to say, with the evidence for each reading."""
+    require(Perm.DOCUMENT_READ)
+    # Called for the refusal, not the value: an unscoped request must not fall
+    # through to the ORM guard and read as "not found" rather than "no tenant".
+    require_org_scope()
+
+    document = _get_document(document_id)
+    result = extraction.extraction_for(document)
+    return respond(
+        {
+            "document_id": document.id,
+            "kind": result.kind,
+            "is_confident": result.is_confident,
+            "review_threshold": extraction.REVIEW_THRESHOLD,
+            "suggestions": [
+                {
+                    "field": suggestion.field,
+                    "value": str(suggestion.value),
+                    "confidence": suggestion.confidence,
+                    "needs_review": suggestion.needs_review,
+                    # The text it was read from, so a caller can check rather
+                    # than trust. A score with nothing behind it just moves the
+                    # guess from the machine to whoever reads the response.
+                    "evidence": suggestion.evidence,
+                    "accepted_at": (
+                        suggestion.accepted_at.isoformat() if suggestion.accepted_at else None
+                    ),
+                    "accepted_by_id": suggestion.accepted_by_id,
+                    "rejected_at": (
+                        suggestion.rejected_at.isoformat() if suggestion.rejected_at else None
+                    ),
+                }
+                for suggestion in result.suggestions
+            ],
+            #: Fields looked for and not found. As wrong as a bad reading and
+            #: much easier to overlook.
+            "missing": result.missing,
+        }
+    )
+
+
+@api_v1_bp.post(
+    "/documents/<id:document_id>/extraction/<field_name>", endpoint="documents_extraction_decide"
+)
+def decide_extraction(document_id: str, field_name: str) -> Response:
+    """Accept a reading, correct it, or throw it out."""
+    require(Perm.DOCUMENT_EXTRACTION_REVIEW)
+    payload = parse_body(ExtractionDecision)
+    org_id = require_org_scope()
+
+    with transaction() as session:
+        document = _get_document(document_id)
+        result = extraction.extraction_for(document)
+        if payload.decision == "accept":
+            extraction.accept_suggestion(
+                session,
+                extraction=result,
+                field_name=field_name,
+                accepted_by_id=current_user.id,
+                org_id=org_id,
+                value=payload.value,
+            )
+        else:
+            extraction.reject_suggestion(
+                result, field_name=field_name, rejected_by_id=current_user.id
+            )
+        extraction.record_decisions(document, result)
+        decided = result.by_field(field_name)
+
+    return respond(
+        {
+            "field": field_name,
+            "value": str(decided.value) if decided else None,
+            "accepted_at": decided.accepted_at.isoformat()
+            if decided and decided.accepted_at
+            else None,
+            "rejected_at": decided.rejected_at.isoformat()
+            if decided and decided.rejected_at
+            else None,
+        }
+    )

@@ -399,6 +399,146 @@ def ownership() -> str:
     )
 
 
+@admin_bp.get("/extractions")
+@login_required
+def extractions() -> str:
+    """Documents with readings a person has not decided on yet.
+
+    Lowest confidence first, because that is the row worth reaching. A queue
+    ordered by arrival puts the machine's most confident guesses in front of a
+    reviewer and buries the ones it got wrong.
+    """
+    require(Perm.DOCUMENT_READ)
+    org_id = require_org_scope()
+
+    from app.models.documents import Document
+    from app.services.documents.extraction import is_reviewable
+
+    candidates = list(
+        db.session.execute(
+            select(Document)
+            .where(
+                Document.org_id == org_id,
+                Document.deleted_at.is_(None),
+                Document.ocr_text.is_not(None),
+            )
+            .order_by(Document.extraction_confidence.asc().nulls_first())
+            .limit(200)
+        ).scalars()
+    )
+    reviewable = [document for document in candidates if is_reviewable(document)]
+    return render_template(
+        "admin/extractions.html",
+        documents=reviewable,
+        # Undecided, so the count means "waiting on you" rather than "seen".
+        pending=[
+            document for document in reviewable if (document.extraction_confidence or 0) < 100
+        ],
+    )
+
+
+@admin_bp.get("/extractions/<id:document_id>")
+@login_required
+def extraction_detail(document_id: str) -> str:
+    """What this document appears to say, and the text each reading came from.
+
+    The evidence is shown beside every value so the reviewer checks rather than
+    trusts. A confidence score with nothing behind it just moves the guess from
+    the machine to the person.
+    """
+    require(Perm.DOCUMENT_READ)
+    org_id = require_org_scope()
+
+    from app.services.documents.extraction import REVIEW_THRESHOLD, extraction_for
+
+    document = _document_or_404(document_id, org_id)
+    try:
+        extraction = extraction_for(document)
+    except AtlasError as exc:
+        flash(str(exc), "error")
+        return render_template(
+            "admin/extraction.html",
+            document=document,
+            extraction=None,
+            threshold=REVIEW_THRESHOLD,
+        )
+
+    return render_template(
+        "admin/extraction.html",
+        document=document,
+        extraction=extraction,
+        threshold=REVIEW_THRESHOLD,
+    )
+
+
+@admin_bp.post("/extractions/<id:document_id>")
+@login_required
+def extraction_decide(document_id: str) -> Response:
+    """Accept a reading, correct it, or throw it out.
+
+    Accepting is the only path from extracted text to a value the system will
+    act on, and it is attributed — so "why does it say this?" has an answer
+    that is a name and a sentence rather than a shrug.
+
+    A correction is not a separate action. The common case is that the
+    extractor found the right field and misread a digit, and making the
+    reviewer reject-then-retype loses the evidence link that made the reading
+    checkable in the first place.
+    """
+    require(Perm.DOCUMENT_EXTRACTION_REVIEW)
+    org_id = require_org_scope()
+
+    from app.services.documents.extraction import (
+        accept_suggestion,
+        extraction_for,
+        record_decisions,
+        reject_suggestion,
+    )
+
+    document = _document_or_404(document_id, org_id)
+    back = redirect(url_for("admin.extraction_detail", document_id=document_id))
+    field_name = (request.form.get("field") or "").strip()
+    action = (request.form.get("action") or "").strip().lower()
+
+    try:
+        extraction = extraction_for(document)
+        if action == "accept":
+            correction = (request.form.get("value") or "").strip()
+            accept_suggestion(
+                current_session(),
+                extraction=extraction,
+                field_name=field_name,
+                accepted_by_id=current_user.id,
+                org_id=org_id,
+                value=correction or None,
+            )
+            message = f"{field_name} accepted."
+        elif action == "reject":
+            reject_suggestion(extraction, field_name=field_name, rejected_by_id=current_user.id)
+            message = f"{field_name} thrown out."
+        else:
+            flash("That is not something you can do to a reading.", "error")
+            return back
+        record_decisions(document, extraction)
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back
+
+
+def _document_or_404(document_id: str, org_id: str):  # noqa: ANN202 - Document
+    from app.models.documents import Document
+
+    record = db.session.get(Document, document_id)
+    if record is None or record.org_id != org_id or record.deleted_at is not None:
+        abort(404)
+    return record
+
+
 @admin_bp.get("/imports")
 @login_required
 def imports() -> str:

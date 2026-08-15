@@ -1,0 +1,135 @@
+{# One document's readings, and the text each came from.
+
+   The evidence sits beside every value on purpose. A confidence score with
+   nothing behind it just moves the guess from the machine to the person, and
+   the reviewer's job is to check rather than to trust.
+
+   The value is editable in the accept form rather than behind a separate
+   "correct" action. The common case is that the extractor found the right
+   field and misread a digit, and making somebody reject-then-retype loses the
+   evidence link that made the reading checkable at all.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}{{ document.name }} · {{ app_name }}{% endblock %}
+{% block heading %}{{ document.name }}{% endblock %}
+{% block nav %}{{ admin_nav('extractions') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if extraction and extraction.needs_review %}
+  <span class="integrity integrity--broken"><span class="integrity__dot"></span>
+    {{ extraction.needs_review | length }} below the threshold</span>
+{% elif extraction %}
+  <span class="integrity"><span class="integrity__dot"></span> Read confidently</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">{{ document.category | humanize }}</h2>
+    <span class="panel__hint">
+      Uploaded {{ document.created_at.date().isoformat() }}
+      {%- if document.ocr_completed_at %}
+        · text read {{ document.ocr_completed_at.date().isoformat() }}
+      {%- endif %}
+    </span>
+  </div>
+  <p class="tiny muted">
+    Nothing below is a fact until you accept it, and accepting puts your name
+    on it. Anything under {{ (threshold * 100) | round | int }}% is flagged
+    because the cost of a wrong lease rent is far above the cost of a second
+    look.
+  </p>
+</div>
+
+{% if extraction %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Readings</h2>
+    <span class="panel__hint">{{ extraction.suggestions | length }} found</span>
+  </div>
+
+  {% if extraction.suggestions %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Field</th><th>Reading</th><th class="num">Confidence</th>
+              <th>Read from</th><th>Decision</th></tr>
+        </thead>
+        <tbody>
+          {% for suggestion in extraction.suggestions %}
+            <tr>
+              <td class="tiny">{{ suggestion.field | humanize }}</td>
+              <td>{{ suggestion.value }}</td>
+              <td class="num">
+                {% if suggestion.needs_review %}
+                  <span class="pill pill--critical">
+                    {{ (suggestion.confidence * 100) | round | int }}%
+                  </span>
+                {% else %}
+                  {{ (suggestion.confidence * 100) | round | int }}%
+                {% endif %}
+              </td>
+              <td class="tiny muted"><code>{{ suggestion.evidence }}</code></td>
+              <td class="tiny">
+                {% if suggestion.accepted_at %}
+                  accepted {{ suggestion.accepted_at.date().isoformat() }}
+                {% elif suggestion.rejected_at %}
+                  <span class="muted">thrown out
+                    {{ suggestion.rejected_at.date().isoformat() }}</span>
+                {% elif can('document.extraction_review') %}
+                  <form method="post" class="inline-form"
+                        action="{{ url_for('admin.extraction_decide',
+                                           document_id=document.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="field" value="{{ suggestion.field }}">
+                    {# Prefilled with what was read, so accepting unchanged is
+                       one click and correcting a digit is two. #}
+                    <input type="text" name="value" value="{{ suggestion.value }}">
+                    <button type="submit" name="action" value="accept" class="btn btn--quiet">
+                      Accept
+                    </button>
+                    <button type="submit" name="action" value="reject" class="btn btn--quiet">
+                      Throw out
+                    </button>
+                  </form>
+                {% else %}
+                  <span class="muted">waiting on a reviewer</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">The extractor read nothing off this document.</p>
+  {% endif %}
+
+  {% if extraction.missing %}
+    <p class="tiny">
+      <strong>Looked for and did not find</strong>
+      <span class="muted">— a missing field is as wrong as a bad one and much
+      easier to overlook</span>
+    </p>
+    <ul>
+      {% for field in extraction.missing %}
+        <li class="tiny">{{ field | humanize }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+</div>
+{% else %}
+<div class="panel">
+  <p class="empty">
+    There is nothing to review on this document.
+  </p>
+</div>
+{% endif %}
+
+<p class="tiny">
+  <a href="{{ url_for('admin.extractions') }}">Back to the queue</a>
+</p>
+{% endblock %}

@@ -24,6 +24,7 @@ SPDX-License-Identifier: MIT
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from decimal import Decimal
 
 import click
@@ -62,6 +63,7 @@ def seed_operations(organization, properties, units, leases, vendor, users, acco
     summary["applications"] = _seed_applications(organization, properties[0], units, users)
     summary["tenancy_endings"] = _seed_tenancy_endings(organization, leases, accounts, users)
     summary["bills"] = _seed_payables(organization, vendor, accounts, users)
+    summary["extractions"] = _seed_extraction(organization, leases)
 
     db.session.flush()
     return summary
@@ -1454,3 +1456,70 @@ def _seed_payables(organization, vendor, accounts, users) -> int:  # noqa: ANN00
 
     db.session.flush()
     return 3
+
+
+def _seed_extraction(organization, leases) -> int:  # noqa: ANN001
+    """A lease and an invoice with text, waiting on a reviewer.
+
+    Left undecided on purpose. The queue's whole point is that a reading is a
+    suggestion until somebody puts their name on it, and a demo that ships
+    everything already accepted shows none of that.
+    """
+    from app.models.documents import Document, DocumentCategory, OcrStatus, ScanStatus
+    from app.services.documents.extraction import extraction_for, record_decisions
+
+    lease = next((record for record in leases if record.org_id == organization.id), None)
+    if lease is None:
+        return 0
+
+    lease_text = "\n".join(
+        [
+            "RESIDENTIAL LEASE AGREEMENT",
+            "",
+            f"Monthly rent: ${lease.rent_amount} payable on the first of each month.",
+            f"Security deposit: ${lease.security_deposit or lease.rent_amount} held in trust.",
+            f"Lease start date: {lease.start_date.isoformat()}",
+            f"Lease end date: {lease.end_date.isoformat() if lease.end_date else ''}",
+        ]
+    )
+    # Deliberately murkier: unlabelled amounts and an ambiguous slash date, so
+    # at least one reading lands under the review threshold and the queue has
+    # something on it that looks like the real problem.
+    invoice_text = "\n".join(
+        [
+            "INVOICE NPS-20577",
+            "",
+            "roof inspection and flashing repair",
+            "total 3450",
+            "due 03/09/2026",
+        ]
+    )
+
+    created = 0
+    for name, category, text, filename in (
+        ("Executed lease - Harrow Court", DocumentCategory.LEASE, lease_text, "lease.pdf"),
+        ("Northlight Roofing invoice", DocumentCategory.INVOICE, invoice_text, "invoice.pdf"),
+    ):
+        document = Document(
+            org_id=organization.id,
+            name=name,
+            original_filename=filename,
+            storage_key=f"documents/{filename}",
+            content_type="application/pdf",
+            size_bytes=len(text.encode()),
+            checksum_sha256=hashlib.sha256(text.encode()).hexdigest(),
+            category=category,
+            scan_status=ScanStatus.CLEAN,
+            is_quarantined=False,
+            ocr_status=OcrStatus.COMPLETED,
+            ocr_text=text,
+            ocr_completed_at=utcnow(),
+        )
+        db.session.add(document)
+        db.session.flush()
+        # Records the confidence the queue sorts by, without deciding anything.
+        record_decisions(document, extraction_for(document))
+        created += 1
+
+    db.session.flush()
+    return created

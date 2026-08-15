@@ -1,0 +1,85 @@
+{# The extraction review queue.
+
+   Lowest confidence first. A queue ordered by arrival puts the machine's most
+   confident guesses in front of a reviewer and buries the ones it got wrong,
+   which is exactly backwards.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Extraction review · {{ app_name }}{% endblock %}
+{% block heading %}Extraction review{% endblock %}
+{% block nav %}{{ admin_nav('extractions') }}{% endblock %}
+
+{% block topbar_meta %}
+{% if pending %}
+  <span class="integrity">
+    <span class="integrity__dot"></span>
+    {{ pending | length }} waiting on a person
+  </span>
+{% else %}
+  <span class="integrity"><span class="integrity__dot"></span> Nothing outstanding</span>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Documents with readings</h2>
+    <span class="panel__hint">{{ documents | length }} with text an extractor understands</span>
+  </div>
+  <p class="tiny muted">
+    Nothing here is a fact yet. These are readings a machine took off a
+    document, and the only path from one to a value the system will act on is
+    somebody accepting it — with their name against it.
+  </p>
+
+  {% if documents %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead>
+          <tr><th>Document</th><th>Category</th><th>Uploaded</th>
+              <th class="num">Lowest confidence</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for document in documents %}
+            <tr>
+              <td>
+                <a href="{{ url_for('admin.extraction_detail', document_id=document.id) }}">
+                  {{ document.name }}
+                </a>
+              </td>
+              <td class="tiny muted">{{ document.category | humanize }}</td>
+              <td class="tiny muted">{{ document.created_at.date().isoformat() }}</td>
+              <td class="num">
+                {% if document.extraction_confidence is none %}
+                  <span class="muted">not read</span>
+                {% elif document.extraction_confidence >= 100 %}
+                  <span class="muted">all decided</span>
+                {% elif document.extraction_confidence < 75 %}
+                  <span class="pill pill--critical">{{ document.extraction_confidence }}%</span>
+                {% else %}
+                  {{ document.extraction_confidence }}%
+                {% endif %}
+              </td>
+              <td class="tiny">
+                {% if (document.extraction_confidence or 0) < 100 %}
+                  <a href="{{ url_for('admin.extraction_detail', document_id=document.id) }}">
+                    Review
+                  </a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">
+      Nothing to review. Documents appear here once they have text and a
+      category an extractor covers — leases, invoices, and insurance
+      certificates.
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

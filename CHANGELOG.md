@@ -12,6 +12,22 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **The extraction review queue is reachable** (ROADMAP 6.8) at
+  `/admin/extractions` and over the API. Readings are shown beside the text
+  they were read from — a confidence score with nothing behind it just moves
+  the guess from the machine to the person — and the value is editable in the
+  accept form, because the common case is a right field with a misread digit
+  and forcing a reject-then-retype loses the evidence link. The queue is
+  ordered by lowest confidence, so what the extractor got wrong is what a
+  reviewer reaches first. Decisions persist on the document; the extraction
+  itself is re-derived from the text each time, so it cannot drift from the
+  document after a re-OCR.
+- **`document.extraction_review`**, a new permission. Accepting a machine's
+  reading of a lease rent or an invoice total is a financial decision and was
+  gated on `document.upload` — which a maintenance technician holds, correctly,
+  for photographing a broken window. Same document, two very different
+  authorities. Held by leasing and accounting operations.
+
 - **Bulk import is reachable** (ROADMAP 6.7) at `/admin/imports` and
   `/api/v1/imports`. The read-only plan step was the whole point of the module
   and nobody could ask for one. The plan is not stored between plan and apply —

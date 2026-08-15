@@ -43,12 +43,16 @@
 </div>
 
 {% if can('user.read') or can('role.read') or can('integration.read')
-      or can('import.run') %}
+      or can('import.run') or can('document.read') %}
 <div class="sidebar__group">
   <div class="sidebar__label">Administration</div>
   {% if can('user.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.users') }}"
        {% if active == 'users' %}aria-current="page"{% endif %}>People</a>
+  {% endif %}
+  {% if can('document.read') %}
+    <a class="sidebar__link" href="{{ url_for('admin.extractions') }}"
+       {% if active == 'extractions' %}aria-current="page"{% endif %}>Extraction review</a>
   {% endif %}
   {% if can('import.run') %}
     <a class="sidebar__link" href="{{ url_for('admin.imports') }}"

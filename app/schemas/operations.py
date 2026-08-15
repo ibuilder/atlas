@@ -102,6 +102,7 @@ __all__ = [
     "RowErrorOut",
     "RowPlanOut",
     "ImportPlanOut",
+    "ExtractionDecision",
     "ScreeningOut",
     "ScreeningRecord",
     "ScreeningRequest",
@@ -1233,3 +1234,14 @@ class ImportPlanOut(AtlasResponse):
     #: per upload gives up before the file is clean.
     errors: list[RowErrorOut] = Field(default_factory=list)
     rows: list[RowPlanOut] = Field(default_factory=list)
+
+
+# -------------------------------------------------------------- extraction
+
+
+class ExtractionDecision(AtlasRequest):
+    decision: Annotated[str, StringConstraints(pattern=r"^(accept|reject)$")]
+    #: A correction, not a separate action. The common case is that the
+    #: extractor found the right field and misread a digit, and forcing a
+    #: reject-then-retype loses the evidence link that made it checkable.
+    value: Annotated[str, StringConstraints(max_length=500)] | None = None
