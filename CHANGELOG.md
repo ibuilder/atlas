@@ -12,6 +12,53 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **`docker-compose.prod.yml`** and `.env.production.example` — a deployment
+  anybody can run anywhere Docker runs. Deliberately a separate file rather
+  than an override on `docker-compose.yml`: every convenience in the
+  development stack is a liability once the thing is reachable, and a forgotten
+  `-f` that silently deploys a default secret is a failure nobody sees. Secrets
+  use `${VAR:?}` so compose refuses to start and names the missing one.
+  Migrations run as their own container, because two web replicas starting
+  together race the same migration and Alembic's lock turns that into a deploy
+  that hangs. The web port binds to loopback for a TLS-terminating proxy.
+- **A release workflow** publishing multi-architecture images to GHCR on a tag,
+  with an SBOM and a scan. CI already built and scanned the image and then
+  threw it away, so the tag `docker-compose.prod.yml` names did not exist — a
+  compose file offering an image nobody can pull fails on their machine rather
+  than ours. It refuses to publish when the tag and the packaged version
+  disagree.
+- **Issue and pull-request templates.** The bug form asks which database,
+  because SQLite and PostgreSQL differ in ways that matter here — money is
+  scaled integers on one and `NUMERIC` on the other, and row-level security
+  only exists on PostgreSQL — and points at `docs/FEATURES.md` first, where a
+  row that does not read **Complete** is a stated gap rather than a bug.
+- **`tests/unit/test_deployment_files.py`**, nine checks over files that are
+  otherwise only exercised by somebody else's outage: every required variable
+  is in the example, no secret has a working default, the database is not
+  published, the image tag is pinned and matches the packaged version.
+
+### Fixed
+
+- **The version said 0.5.0 with two 0.6 milestones shipped.** `/api/v1`
+  reported a version that did not include the endpoints being called, which
+  nobody notices until a bug is filed against the wrong release. Now 0.6.0,
+  with a test asserting `app.__version__`, `pyproject.toml`, and the newest
+  changelog heading agree — the drift is what let it happen.
+
+
+## [0.6.0] - 2026-08-15
+
+**Make it operable.** Ten service modules were implemented, tested, and
+reachable by nothing a user could get to — whole capabilities that existed in
+the codebase and not in the product. This release is the surfaces for all of
+them, and the bugs that building surfaces exposed in the services underneath.
+
+`tests/unit/test_service_reachability.py` now holds two empty lists, and no
+`docs/FEATURES.md` row carries the **No surface** status. The status stays
+defined because the guard is what keeps it empty.
+
+### Added
+
 - **`flask seed load`**, a production-shaped data generator for load testing.
   Not the demo seed with a bigger number: deliberately *skewed*, because a
   uniform database measures an index that behaves nothing like production and

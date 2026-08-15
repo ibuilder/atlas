@@ -118,3 +118,33 @@ def test_the_readme_points_at_both_guides():
     readme = _text(ROOT / "README.md")
     assert "docs/DOMAIN.md" in readme
     assert "DEPLOYMENT.md" in readme
+
+
+def test_the_version_agrees_with_itself_and_the_changelog():
+    """One version, stated in three places, and they drift.
+
+    This is not pedantry: 0.6.0's first two milestones shipped against a
+    ``__version__`` of 0.5.0, so ``/api/v1`` reported a version that had not
+    included the endpoints being called. Nobody notices until somebody files a
+    bug against the wrong release.
+    """
+    import re
+    import tomllib
+
+    from app import __version__
+
+    root = pathlib.Path(__file__).resolve().parents[2]
+    packaged = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    declared = packaged["project"]["version"]
+
+    assert __version__ == declared, (
+        f"app.__version__ is {__version__} and pyproject says {declared}."
+    )
+
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    released = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
+    assert released, "The changelog has no released version headings."
+    assert released[0] == declared, (
+        f"The newest changelog entry is {released[0]} and the package says {declared}. "
+        "Cut the release heading, or bump the version."
+    )

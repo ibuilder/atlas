@@ -1,0 +1,171 @@
+# A deployable Atlas. Portable on purpose: anywhere Docker runs.
+#
+# Deliberately *not* an extension of docker-compose.yml. That file exists to
+# get a developer running in one command, and every convenience in it — a
+# default secret, an exposed database port, HTTPS off — is a liability here.
+# Layering overrides on top of it means a forgotten `-f` deploys the
+# development defaults, and that failure is silent. A separate file cannot be
+# half-applied.
+#
+#   cp .env.production.example .env.production
+#   # fill it in — see below; nothing here has a default that would boot
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+#
+# Every secret is `${VAR:?...}`: unset means compose refuses to start and says
+# which one. The application refuses too — see DEPLOYMENT.md §2 — but failing
+# at compose is a second earlier and names the variable rather than the config
+# field.
+#
+# What this does not do for you: TLS termination, backups, and log shipping.
+# See DEPLOYMENT.md §8. Put this behind a reverse proxy that terminates TLS.
+#
+# SPDX-License-Identifier: MIT
+
+name: atlas
+
+x-app: &app
+  image: ${ATLAS_IMAGE:-ghcr.io/ibuilder/atlas:0.6.0}
+  restart: unless-stopped
+  environment: &app-env
+    ATLAS_ENV: production
+    DATABASE_URL: postgresql+psycopg://atlas:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/atlas
+    REDIS_URL: redis://redis:6379/0
+
+    # Both must be at least 32 characters and neither may be a placeholder;
+    # production refuses to boot otherwise. Generate with:
+    #   python -c "import secrets; print(secrets.token_urlsafe(48))"
+    SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+    # And this one with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    #
+    # Back it up somewhere with a *different blast radius* from the database.
+    # If it is in the same secret store and that store is what you lose, the
+    # restore comes back and every encrypted column is unreadable.
+    FIELD_ENCRYPTION_KEY: ${FIELD_ENCRYPTION_KEY:?set FIELD_ENCRYPTION_KEY}
+    WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET:?set WEBHOOK_SIGNING_SECRET}
+
+    FORCE_HTTPS: "true"
+    SESSION_COOKIE_SECURE: "true"
+    # No wildcard. Production refuses `*`, and a browser-facing deployment that
+    # allowed it would hand any origin an authenticated session.
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+
+    LOG_FORMAT: json
+    STORAGE_LOCAL_PATH: /app/instance/storage
+    MALWARE_SCANNER: clamav
+    CLAMAV_HOST: clamav
+    CLAMAV_PORT: "3310"
+  volumes:
+    - atlas-instance:/app/instance
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    clamav:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: atlas
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: atlas
+    # No published port. The development file exposes 5432 so you can attach a
+    # client; here that is the database on the internet.
+    volumes:
+      - atlas-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U atlas -d atlas"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - atlas-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    volumes:
+      - atlas-clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --version || exit 1"]
+      # The first start downloads signatures and takes several minutes. The
+      # app waits on this rather than releasing unscanned uploads, so a slow
+      # first boot is the system working.
+      interval: 30s
+      timeout: 10s
+      retries: 40
+      start_period: 300s
+
+  migrate:
+    <<: *app
+    # Migrations run once, as their own container, rather than on web start.
+    # Two web replicas starting together would otherwise race the same
+    # migration, and Alembic's lock turns that into a deploy that hangs.
+    restart: "no"
+    command: ["flask", "--app", "wsgi", "db", "upgrade"]
+
+  web:
+    <<: *app
+    command:
+      - gunicorn
+      - --bind=0.0.0.0:8000
+      - --workers=${WEB_WORKERS:-4}
+      - --timeout=60
+      - --access-logfile=-
+      - wsgi:app
+    ports:
+      # Bound to loopback: put a TLS-terminating proxy in front. Publishing
+      # this on 0.0.0.0 serves the application over plain HTTP to the world,
+      # while FORCE_HTTPS above makes it redirect to a scheme it is not
+      # actually being served on.
+      - "127.0.0.1:${WEB_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      # Readiness, not liveness: it refuses traffic while a migration is
+      # pending, which is exactly what a rolling deploy needs to wait on.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz', timeout=5).status == 200 else 1)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    <<: *app
+    command: ["celery", "-A", "app.tasks.celery_app:make_celery()", "worker", "--loglevel=info"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  beat:
+    <<: *app
+    # Exactly one. Two beats double every scheduled job, and the jobs that
+    # matter here — delinquency notices, disposition deadlines — are ones
+    # nobody wants sent twice.
+    deploy:
+      replicas: 1
+    command: ["celery", "-A", "app.tasks.celery_app:make_celery()", "beat", "--loglevel=info"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  atlas-db:
+  atlas-redis:
+  atlas-clamav:
+  atlas-instance:

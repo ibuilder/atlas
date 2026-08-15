@@ -55,7 +55,19 @@ docker compose up --build
 ```
 
 That brings up Postgres, Redis, the web app, a Celery worker, and Celery beat, runs migrations on start, and seeds
-the demo tenant.
+the demo tenant. It is a *development* stack: a default secret, HTTPS off, and the database port published, all of
+which are conveniences locally and liabilities anywhere else.
+
+To deploy it, use the file that has none of them:
+
+```bash
+cp .env.production.example .env.production   # then fill it in; nothing has a working default
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+That pulls a published image rather than building, runs migrations as their own step, binds the web port to
+loopback for a TLS-terminating proxy to sit in front of, and refuses to start if any secret is unset. See
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
 <details>
 <summary><b>Manual setup</b></summary>

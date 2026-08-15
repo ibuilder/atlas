@@ -1,0 +1,52 @@
+name: Bug report
+description: Something behaves differently from what the documentation says.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: `docs/FEATURES.md` states the status of every capability.
+        A row that does not say **Complete** is a known gap rather than a bug,
+        and saying so there is deliberate.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` from `/api/v1` or your image tag.
+      placeholder: "0.6.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      description: SQLite and PostgreSQL differ in ways that matter — money is stored as scaled integers on one and NUMERIC on the other, and row-level security only exists on PostgreSQL.
+      options: ["PostgreSQL", "SQLite"]
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and where you read it
+      description: A quote from the docs or a docstring is ideal. If the documentation is what is wrong, that is the more useful bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the correlation id from the response or the logs if you have one — every request carries one, and it ties the request to its audit events.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: Against `flask seed demo` if you can. A reproduction on the demo tenant is one anybody can run.
+    validations:
+      required: true

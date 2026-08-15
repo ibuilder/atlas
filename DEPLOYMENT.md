@@ -131,6 +131,27 @@ policy, which turns "somebody forgot" into a red build rather than a breach.
 
 ## 4. First run
 
+### The quickest whole deployment
+
+```bash
+cp .env.production.example .env.production   # fill it in; nothing has a working default
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+Deliberately a separate file from `docker-compose.yml` rather than an override
+on top of it. Every convenience in the development stack — a default secret,
+HTTPS off, the database port published — is a liability once the thing is
+reachable, and a forgotten `-f` that silently deploys those defaults is a
+failure nobody sees. A separate file cannot be half-applied.
+
+It pulls a published image rather than building, runs migrations as their own
+container so two replicas cannot race the same one, and binds the web port to
+loopback: put a TLS-terminating proxy in front of it.
+
+Then create the organization and its administrator, as below.
+
+### By hand
+
 ```bash
 alembic upgrade head
 
