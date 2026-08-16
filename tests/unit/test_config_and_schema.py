@@ -34,6 +34,12 @@ def _production(**overrides):
         "redis_url": "redis://redis:6379/0",
         "storage_backend": "s3",
         "mail_backend": "smtp",
+        # An SMTP backend is only half a mail configuration: production also
+        # requires somewhere to connect and a sender on a domain that can pass
+        # SPF. See tests/unit/test_production_refusals.py for why each is a
+        # boot refusal rather than a runtime surprise.
+        "smtp_host": "smtp.example.com",
+        "mail_from": "no-reply@atlas-pmos.io",
     }
     base.update(overrides)
     return ProductionSettings(**base)

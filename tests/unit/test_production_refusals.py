@@ -38,6 +38,10 @@ BASE = {
     "STORAGE_BUCKET": "atlas-documents",
     "MAIL_BACKEND": "smtp",
     "SMTP_HOST": "smtp.example.com",
+    # A domain that is not RFC-2606 reserved. The *sender* is validated because
+    # a reserved one cannot pass SPF; the SMTP relay host is not, since that is
+    # a hostname Atlas connects out to rather than one recipients check.
+    "MAIL_FROM": "no-reply@atlas-pmos.io",
 }
 
 
@@ -67,6 +71,17 @@ def test_a_complete_production_environment_boots(monkeypatch):
         ({"MFA_REQUIRED_FOR_PRIVILEGED": "false"}, "MFA"),
         ({"SECRET_KEY": "short"}, "SECRET_KEY"),
         ({"CORS_ALLOWED_ORIGINS": "*"}, "Wildcard"),
+        # An SMTP backend with nowhere to connect. Boots fine, then fails once
+        # per send inside a worker rather than once at startup where it is seen.
+        ({"SMTP_HOST": ""}, "SMTP_HOST"),
+        # The shipped default, which is exactly what an incomplete deploy keeps.
+        ({"MAIL_FROM": "no-reply@atlas.example"}, "reserved domain"),
+        ({"MAIL_FROM": "no-reply@example.com"}, "reserved domain"),
+        ({"MAIL_FROM": "operations@atlas.localhost"}, "reserved domain"),
+        # Display-name form: the domain still has to be extracted and checked.
+        ({"MAIL_FROM": '"Atlas" <no-reply@example.org>'}, "reserved domain"),
+        ({"MAIL_FROM": "not-an-address"}, "usable address"),
+        ({"MAIL_FROM": ""}, "usable address"),
     ],
 )
 def test_production_refuses(monkeypatch, override, fragment):
@@ -94,6 +109,8 @@ def test_production_refuses(monkeypatch, override, fragment):
         "CORS_ALLOWED_ORIGINS",
         "STORAGE_BACKEND",
         "MAIL_BACKEND",
+        "MAIL_FROM",
+        "SMTP_HOST",
         "MFA_REQUIRED_FOR_PRIVILEGED",
     ],
 )
@@ -135,3 +152,49 @@ def test_the_reference_compose_satisfies_the_refusals():
     )
     assert environment["FORCE_HTTPS"] == "true"
     assert environment["SESSION_COOKIE_SECURE"] == "true"
+
+
+@pytest.mark.parametrize(
+    "sender",
+    [
+        "no-reply@atlas-pmos.io",
+        "notices@properties.co.uk",
+        '"Atlas Notices" <no-reply@atlas-pmos.io>',
+        # `.example` is reserved; `example-realty.com` merely contains the word.
+        # A substring check here would reject a legitimate customer domain.
+        "billing@example-realty.com",
+    ],
+)
+def test_a_real_sender_is_accepted(monkeypatch, sender):
+    """The other half. A refusal that also rejects valid addresses is worse
+    than none: it fails a deploy that was correct."""
+    assert _load(monkeypatch, MAIL_FROM=sender).mail_from == sender
+
+
+def test_the_example_env_file_does_not_ship_a_refused_sender():
+    """The bug this whole check exists to prevent, in the file people copy.
+
+    `.env.production.example` shipped `no-reply@atlas.example.com` — a deployer
+    following the guide verbatim would fill in every blank, leave the one field
+    that already had a plausible value, and ship a deployment whose mail is
+    dropped by every recipient. A prefilled placeholder is worse than a blank
+    one precisely because it looks finished.
+    """
+    from app.config.prod import RESERVED_MAIL_DOMAINS, RESERVED_MAIL_SUFFIXES
+
+    text = (ROOT / ".env.production.example").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if not line.startswith("MAIL_FROM="):
+            continue
+        value = line.partition("=")[2].strip()
+        if not value:
+            return  # Blank is the intended state: the deployer must supply it.
+        domain = value.rstrip(">").rpartition("@")[2].lower()
+        assert domain not in RESERVED_MAIL_DOMAINS, (
+            f"The example ships MAIL_FROM={value}, which production refuses."
+        )
+        assert not domain.endswith(RESERVED_MAIL_SUFFIXES), (
+            f"The example ships MAIL_FROM={value}, which production refuses."
+        )
+        return
+    pytest.fail("MAIL_FROM is not present in .env.production.example at all.")

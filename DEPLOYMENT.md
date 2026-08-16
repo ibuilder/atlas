@@ -74,6 +74,12 @@ These are `ConfigError` at startup, not warnings:
   has failed quietly
 - `MAIL_BACKEND=console` — delinquency notices carry statutory response
   deadlines, and a backend that prints them to a log has not sent them
+- `SMTP_HOST` empty while `MAIL_BACKEND=smtp` — every send then fails at connect
+  time inside a worker, where the only trace is a task traceback
+- `MAIL_FROM` unset, malformed, or on a reserved domain (`example.com`, or
+  anything under `.example`, `.invalid`, `.test`, `.localhost`) — such a sender
+  cannot pass SPF, and the receiving server's rejection never travels back, so
+  Atlas records the notice as sent while the recipient never sees it
 - `MFA_REQUIRED_FOR_PRIVILEGED` disabled
 - A non-PostgreSQL `DATABASE_URL`, or a Redis URL that is really an in-memory cache
 
