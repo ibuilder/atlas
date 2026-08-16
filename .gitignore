@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -11,7 +11,11 @@ dist/
 venv/
 .env
 .env.*
+# Un-ignored by name rather than by a *.example glob, so adding a new example
+# file is a deliberate act. .env.production.example was silently swallowed by
+# the rule above and shipped a test that read a file CI never had.
 !.env.example
+!.env.production.example
 
 # Instance data - databases, uploads, generated documents
 instance/

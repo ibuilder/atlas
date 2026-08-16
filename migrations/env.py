@@ -17,7 +17,9 @@ SPDX-License-Identifier: MIT
 
 from __future__ import annotations
 
+import configparser
 import logging
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -29,8 +31,24 @@ from app.models.base import Base
 
 config = context.config
 
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Only if the file is actually there *and* carries logging config.
+#
+# The obvious `if config.config_file_name is not None` is not enough, and the
+# difference is the whole reason `flask db upgrade` never worked: Flask-Migrate
+# sets config_file_name to `<migrations>/alembic.ini`, which does not exist â€”
+# this project's alembic.ini is at the repository root â€” so the name is set,
+# the guard passes, and fileConfig raises. Running `alembic upgrade head` from
+# the root worked and hid it, which is why the runbook's command was fine and
+# the README's was not.
+#
+# The `formatters` check matters separately: a config file present but without
+# logging sections makes fileConfig raise KeyError rather than anything that
+# names the problem.
+if config.config_file_name and os.path.exists(config.config_file_name):
+    parsed = configparser.ConfigParser()
+    parsed.read(config.config_file_name)
+    if parsed.has_section("formatters"):
+        fileConfig(config.config_file_name)
 
 log = logging.getLogger("alembic.env")
 

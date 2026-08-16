@@ -18,7 +18,7 @@ re-run against the same data is a number, not a measurement.
 Speed forces one compromise, taken openly. Bulk inserts bypass the service
 layer, which is where the ledger's balance invariant and the audit chain live.
 Rather than trust that the generator got them right, this command *verifies*
-them afterwards with the same checks a disaster restore uses — the trial
+them afterwards with the same checks a disaster restore uses â€” the trial
 balance must be zero per organization and every audit chain must walk clean.
 If the generator is wrong, the seed fails rather than handing a load test a
 database that quietly is not Atlas-shaped.
@@ -102,7 +102,12 @@ def seed_load(
         click.echo(f"Organization {slug!r} already exists. Drop it first, or use another slug.")
         raise SystemExit(1)
 
-    rng = random.Random(RNG_SEED)  # noqa: S311 - shaping test data, not security
+    # Both suppressions below are deliberate. `random` is the right choice here
+    # and `secrets` is not: the whole point is a *seeded, reproducible*
+    # sequence — two runs must produce the same database or two load results
+    # cannot be compared — and a cryptographic generator cannot be seeded.
+    # Nothing here reaches an authentication path; it shapes synthetic data.
+    rng = random.Random(RNG_SEED)  # nosec B311  # noqa: S311
     started = utcnow()
 
     organization = _create_org(slug)
@@ -251,7 +256,7 @@ def _properties(organization, *, rng: random.Random, count: int) -> list[dict[st
                 "country": "US",
                 # max(1, ...) so the skew survives a small run. int(4 * 0.10)
                 # is zero, which would quietly hand a smoke test a perfectly
-                # flat portfolio — the one shape this generator exists to
+                # flat portfolio â€” the one shape this generator exists to
                 # avoid producing.
                 "is_large": index < max(1, int(count * LARGE_PROPERTY_SHARE)),
             }
@@ -562,9 +567,9 @@ def _portal_resident(organization, residents: list[dict[str, Any]]) -> None:  # 
     """The account the load profile's resident signs in as.
 
     The locust profile hard-codes ``resident@atlas.demo``. Without it here, its
-    ResidentUser fails every request and the portal path — which re-derives
+    ResidentUser fails every request and the portal path â€” which re-derives
     ownership on every load, and is therefore one of the more expensive things
-    measured — silently goes unmeasured.
+    measured â€” silently goes unmeasured.
     """
     from app.cli.seed import DEMO_PASSWORD
     from app.models.iam import UserType
@@ -594,8 +599,8 @@ def _audit(  # noqa: ANN201
 ) -> int:
     """A hash-linked audit chain, built in one pass rather than one call each.
 
-    The chain is sequential by construction — each entry hashes the one before
-    it — so it can be computed in a loop and inserted at once. It is then
+    The chain is sequential by construction â€” each entry hashes the one before
+    it â€” so it can be computed in a loop and inserted at once. It is then
     walked by ``verify_chain`` like any other, which is what makes taking the
     shortcut defensible.
     """

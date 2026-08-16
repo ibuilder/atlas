@@ -1,4 +1,4 @@
-# Deployment
+﻿# Deployment
 
 How to run Atlas somewhere that matters. The reference deployment is
 `docker-compose.yml`; anything below that says **must** is enforced by the
@@ -15,7 +15,7 @@ backup and restore specifically, see
 
 | Component | Why | Notes |
 |---|---|---|
-| PostgreSQL 14+ | System of record | **Required** outside development — see §3 |
+| PostgreSQL 14+ | System of record | **Required** outside development â€” see Â§3 |
 | Redis 7+ | Celery broker, rate-limit and cache backend | |
 | A malware scanner | Uploads are quarantined until one clears them | ClamAV in the reference compose |
 | Object storage or a volume | Documents | Local path by default; S3-compatible supported |
@@ -23,12 +23,12 @@ backup and restore specifically, see
 
 Three process types, all from the same image:
 
-- **web** — Gunicorn behind your TLS terminator
-- **worker** — Celery worker
-- **beat** — Celery beat, **exactly one instance**
+- **web** â€” Gunicorn behind your TLS terminator
+- **worker** â€” Celery worker
+- **beat** â€” Celery beat, **exactly one instance**
 
 > Running two `beat` processes runs every scheduled job twice. The jobs are
-> idempotent by watermark, so this is survivable rather than catastrophic — but
+> idempotent by watermark, so this is survivable rather than catastrophic â€” but
 > it doubles the load and makes the logs lie about how often things happen.
 
 ---
@@ -44,7 +44,7 @@ settings object. `ATLAS_ENV` selects the profile: `development`, `testing`,
 | Variable | What it protects | If it changes |
 |---|---|---|
 | `SECRET_KEY` | Sessions, CSRF tokens, signed URLs | Everyone is signed out; signed links break |
-| `FIELD_ENCRYPTION_KEY` | Encrypted columns — bank details, TINs | **Encrypted data is unrecoverable.** Back it up separately from the database |
+| `FIELD_ENCRYPTION_KEY` | Encrypted columns â€” bank details, TINs | **Encrypted data is unrecoverable.** Back it up separately from the database |
 | `WEBHOOK_SIGNING_SECRET` | Outbound webhook signatures | Consumers reject deliveries until updated |
 
 `FIELD_ENCRYPTION_KEY` is a urlsafe base64 32-byte Fernet key:
@@ -54,7 +54,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 ```
 
 **Store it somewhere the database backup is not.** A backup and the key to read
-it, in one place, is one compromise rather than two — and a backup without the
+it, in one place, is one compromise rather than two â€” and a backup without the
 key is a restore that produces unreadable columns. The disaster-recovery runbook
 recovers the key *first*, before the database, for that reason.
 
@@ -69,6 +69,13 @@ These are `ConfigError` at startup, not warnings:
 - `CSRF_ENABLED` disabled
 - `CELERY_TASK_ALWAYS_EAGER` enabled
 - `*` in `CORS_ALLOWED_ORIGINS`
+- `STORAGE_BACKEND=local` — object storage is required; local disk is not
+  durable across replicas, and a restore that comes back without the documents
+  has failed quietly
+- `MAIL_BACKEND=console` — delinquency notices carry statutory response
+  deadlines, and a backend that prints them to a log has not sent them
+- `MFA_REQUIRED_FOR_PRIVILEGED` disabled
+- A non-PostgreSQL `DATABASE_URL`, or a Redis URL that is really an in-memory cache
 
 Failing to start is cheaper than failing open. If one of these bites during a
 deploy, it has just prevented the incident.
@@ -92,14 +99,14 @@ deploy, it has just prevented the incident.
 
 **Do not connect as a superuser.** This is the single most important line in
 this document. Tenant isolation's third layer is PostgreSQL row-level security,
-and **a superuser bypasses RLS unconditionally** — silently, with no error. Two
+and **a superuser bypasses RLS unconditionally** â€” silently, with no error. Two
 of the three isolation layers still hold, but the one that catches everything
 else does not.
 
 Create a role that is not a superuser and does not own the tables:
 
 ```sql
-CREATE ROLE atlas_app LOGIN PASSWORD '…' NOSUPERUSER NOCREATEDB NOCREATEROLE;
+CREATE ROLE atlas_app LOGIN PASSWORD 'â€¦' NOSUPERUSER NOCREATEDB NOCREATEROLE;
 GRANT CONNECT ON DATABASE atlas TO atlas_app;
 GRANT USAGE ON SCHEMA public TO atlas_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO atlas_app;
@@ -108,7 +115,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO atlas_app;
 
 Run migrations as a role that *can* alter the schema, and run the application as
 `atlas_app`. `FORCE ROW LEVEL SECURITY` is applied by migration, so the table
-owner is subject to the policy too — but ownership still carries DDL rights the
+owner is subject to the policy too â€” but ownership still carries DDL rights the
 application has no business holding.
 
 ### Migrations
@@ -139,8 +146,8 @@ docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 ```
 
 Deliberately a separate file from `docker-compose.yml` rather than an override
-on top of it. Every convenience in the development stack — a default secret,
-HTTPS off, the database port published — is a liability once the thing is
+on top of it. Every convenience in the development stack â€” a default secret,
+HTTPS off, the database port published â€” is a liability once the thing is
 reachable, and a forgotten `-f` that silently deploys those defaults is a
 failure nobody sees. A separate file cannot be half-applied.
 
@@ -228,7 +235,7 @@ skipped, and a double run does not double-charge.
 ## 7. Upgrading
 
 1. Read the [CHANGELOG](CHANGELOG.md). Breaking changes are called out.
-2. Back up, and verify the backup — see the DR runbook.
+2. Back up, and verify the backup â€” see the DR runbook.
 3. `alembic upgrade head` with the application stopped or in maintenance mode.
 4. Roll the web processes, then workers, then beat.
 5. `flask atlas verify-restore` if the upgrade touched anything structural: it
@@ -250,7 +257,7 @@ Stated plainly, because finding out later is worse:
 - **Secret management.** Environment variables are read once at boot. Use your
   platform's secret store to put them there.
 - **Horizontal scale beyond one beat.** Web and workers scale out; beat does not.
-- **The four 1.0 conditions** in [ROADMAP.md](ROADMAP.md) — a disaster-recovery
+- **The four 1.0 conditions** in [ROADMAP.md](ROADMAP.md) â€” a disaster-recovery
   drill actually executed, load testing on production-shaped hardware, an
   independent penetration test, and a 90-day soak. They are unticked because
   they are unmet, not because they are unimportant.

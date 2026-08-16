@@ -13,10 +13,10 @@ from __future__ import annotations
 import os
 import secrets
 from datetime import timedelta
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 EnvName = Literal["development", "testing", "staging", "production"]
 
@@ -127,7 +127,13 @@ class Settings(BaseSettings):
     csrf_time_limit_seconds: int = Field(default=7_200, ge=300)
     #: Number of proxies in front of the app; 0 disables header trust entirely.
     trusted_proxy_count: int = Field(default=0, ge=0, le=8)
-    cors_allowed_origins: list[str] = Field(default_factory=list)
+    #: ``NoDecode`` matters more than it looks. Without it, pydantic-settings
+    #: treats a ``list`` field as complex and runs ``json.loads`` on the
+    #: environment value *before* any validator sees it — so the comma-separated
+    #: form the validator below exists to accept could never reach it, and
+    #: ``CORS_ALLOWED_ORIGINS=https://example.com`` failed the application's
+    #: startup with a parse error rather than being split. Found by deploying it.
+    cors_allowed_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     password_min_length: int = Field(default=12, ge=8, le=256)
     password_max_length: int = Field(default=1_024, ge=64)
@@ -224,9 +230,34 @@ class Settings(BaseSettings):
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: Any) -> Any:
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return value
+        """Accept the comma form and the JSON one.
+
+        ``NoDecode`` on the field stops pydantic-settings JSON-parsing the
+        environment value before this runs, which is what lets the comma form
+        work at all. But somebody following pydantic-settings' own
+        documentation writes a JSON array, and splitting that on commas yields
+        origins like ``["https://a.example.com"`` — wrong, and wrong quietly.
+        Both forms are reasonable to write, so both are read.
+        """
+        if not isinstance(value, str):
+            return value
+
+        text = value.strip()
+        if text.startswith("["):
+            import json
+
+            try:
+                decoded = json.loads(text)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{text!r} starts like a JSON array and is not one. Give a "
+                    "comma-separated list, or valid JSON."
+                ) from exc
+            if not isinstance(decoded, list):
+                raise ValueError("A JSON value for allowed origins must be an array.")
+            return [str(item).strip() for item in decoded if str(item).strip()]
+
+        return [item.strip() for item in text.split(",") if item.strip()]
 
     @model_validator(mode="after")
     def _derive_defaults(self) -> Settings:

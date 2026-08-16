@@ -1,23 +1,23 @@
-# A deployable Atlas. Portable on purpose: anywhere Docker runs.
+﻿# A deployable Atlas. Portable on purpose: anywhere Docker runs.
 #
 # Deliberately *not* an extension of docker-compose.yml. That file exists to
-# get a developer running in one command, and every convenience in it — a
-# default secret, an exposed database port, HTTPS off — is a liability here.
+# get a developer running in one command, and every convenience in it â€” a
+# default secret, an exposed database port, HTTPS off â€” is a liability here.
 # Layering overrides on top of it means a forgotten `-f` deploys the
 # development defaults, and that failure is silent. A separate file cannot be
 # half-applied.
 #
 #   cp .env.production.example .env.production
-#   # fill it in — see below; nothing here has a default that would boot
+#   # fill it in â€” see below; nothing here has a default that would boot
 #   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 #
 # Every secret is `${VAR:?...}`: unset means compose refuses to start and says
-# which one. The application refuses too — see DEPLOYMENT.md §2 — but failing
+# which one. The application refuses too â€” see DEPLOYMENT.md Â§2 â€” but failing
 # at compose is a second earlier and names the variable rather than the config
 # field.
 #
 # What this does not do for you: TLS termination, backups, and log shipping.
-# See DEPLOYMENT.md §8. Put this behind a reverse proxy that terminates TLS.
+# See DEPLOYMENT.md Â§8. Put this behind a reverse proxy that terminates TLS.
 #
 # SPDX-License-Identifier: MIT
 
@@ -51,7 +51,29 @@ x-app: &app
     CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
 
     LOG_FORMAT: json
-    STORAGE_LOCAL_PATH: /app/instance/storage
+
+    # Production refuses local disk for documents: it is not durable across
+    # replicas, and a restore that comes back without them is a restore that
+    # failed quietly. MinIO satisfies that with no cloud account, which is what
+    # keeps this file deployable anywhere. Point these at S3, R2, or Spaces
+    # instead and delete the `minio` services below.
+    STORAGE_BACKEND: s3
+    STORAGE_BUCKET: ${STORAGE_BUCKET:-atlas-documents}
+    STORAGE_ENDPOINT_URL: ${STORAGE_ENDPOINT_URL:-http://minio:9000}
+    STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+    AWS_ACCESS_KEY_ID: ${STORAGE_ACCESS_KEY:?set STORAGE_ACCESS_KEY}
+    AWS_SECRET_ACCESS_KEY: ${STORAGE_SECRET_KEY:?set STORAGE_SECRET_KEY}
+
+    # Production refuses the console mail backend too, and rightly: delinquency
+    # notices carry statutory response deadlines, and a backend that prints
+    # them to a log has not sent them.
+    MAIL_BACKEND: smtp
+    MAIL_FROM: ${MAIL_FROM:?set MAIL_FROM}
+    SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
+    SMTP_PORT: ${SMTP_PORT:-587}
+    SMTP_USERNAME: ${SMTP_USERNAME:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
     MALWARE_SCANNER: clamav
     CLAMAV_HOST: clamav
     CLAMAV_PORT: "3310"
@@ -64,6 +86,11 @@ x-app: &app
       condition: service_healthy
     clamav:
       condition: service_healthy
+    # The bucket has to exist before anything tries to write a document into
+    # it, and a first upload failing on a missing bucket looks like a storage
+    # outage rather than a setup step.
+    createbucket:
+      condition: service_completed_successfully
 
 services:
   db:
@@ -110,6 +137,43 @@ services:
       retries: 40
       start_period: 300s
 
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?set STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?set STORAGE_SECRET_KEY}
+    # Not published. The application reaches it on the compose network; nothing
+    # outside needs to, and an object store on the internet holding scanned
+    # lease documents is the incident this file exists to avoid.
+    volumes:
+      - atlas-objects:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  createbucket:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_healthy
+    # Idempotent: `mb --ignore-existing` on every start, so a restart is not a
+    # failure and a fresh volume is not a manual step somebody forgets.
+    entrypoint: >
+      sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/$${BUCKET} &&
+      mc anonymous set none local/$${BUCKET}
+      "
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY:?set STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY:?set STORAGE_SECRET_KEY}
+      BUCKET: ${STORAGE_BUCKET:-atlas-documents}
+
   migrate:
     <<: *app
     # Migrations run once, as their own container, rather than on web start.
@@ -155,7 +219,7 @@ services:
   beat:
     <<: *app
     # Exactly one. Two beats double every scheduled job, and the jobs that
-    # matter here — delinquency notices, disposition deadlines — are ones
+    # matter here â€” delinquency notices, disposition deadlines â€” are ones
     # nobody wants sent twice.
     deploy:
       replicas: 1
@@ -166,6 +230,7 @@ services:
 
 volumes:
   atlas-db:
+  atlas-objects:
   atlas-redis:
   atlas-clamav:
   atlas-instance:

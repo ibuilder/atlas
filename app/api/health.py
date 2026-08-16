@@ -23,6 +23,7 @@ from typing import Any
 from flask import Blueprint, Response, current_app, jsonify
 from sqlalchemy import text
 
+from app.extensions import talisman
 from app.logging import get_logger
 
 health_bp = Blueprint("health", __name__)
@@ -30,14 +31,29 @@ log = get_logger("api.health")
 
 __all__ = ["health_bp"]
 
+#: Probes are exempt from the HTTPS redirect, and they have to be.
+#:
+#: Every orchestrator — Kubernetes, ECS, a plain Docker healthcheck, a load
+#: balancer — probes over plain HTTP from inside the network, where there is no
+#: certificate to present and no proxy in the path. Redirecting those to HTTPS
+#: means the probe never sees a 200, the container never reports healthy, and a
+#: rolling deploy stalls with every replica running correctly. Found exactly
+#: that way: the container booted fine and sat in `starting` forever.
+#:
+#: Nothing is given away by serving these over HTTP. They answer up or down and
+#: deliberately carry no version, hostname, or dependency detail.
+_probe = talisman(force_https=False)
+
 
 @health_bp.get("/healthz")
+@_probe
 def liveness() -> Response:
     """Process is running and the event loop is responsive."""
     return jsonify({"status": "ok"})
 
 
 @health_bp.get("/readyz")
+@_probe
 def readiness() -> tuple[Response, int]:
     """Dependencies required to serve a request are reachable."""
     checks: dict[str, dict[str, Any]] = {}

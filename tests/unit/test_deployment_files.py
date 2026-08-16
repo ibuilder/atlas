@@ -60,8 +60,12 @@ def test_no_secret_has_a_working_default():
     cleanly, looks correct, and every deployment shares the same key.
     """
     text = PROD.read_text(encoding="utf-8")
-    for name in ("SECRET_KEY", "FIELD_ENCRYPTION_KEY", "WEBHOOK_SIGNING_SECRET",
-                 "POSTGRES_PASSWORD"):
+    for name in (
+        "SECRET_KEY",
+        "FIELD_ENCRYPTION_KEY",
+        "WEBHOOK_SIGNING_SECRET",
+        "POSTGRES_PASSWORD",
+    ):
         assert f"${{{name}:-" not in text, f"{name} has a fallback value in the production compose."
         assert f"${{{name}:?" in text, f"{name} is not demanded in the production compose."
 

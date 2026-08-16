@@ -12,6 +12,22 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **MinIO in the reference deployment**, so `docker-compose.prod.yml` can
+  actually satisfy the object-storage requirement it is subject to. Production
+  refuses local disk for documents — not durable across replicas, and a restore
+  that comes back without them has failed quietly — which made the previous
+  file unbootable. MinIO satisfies that invariant rather than weakening it, and
+  with no cloud account, which is what keeps the file deployable anywhere.
+- **`tests/unit/test_production_refusals.py`** and
+  **`tests/unit/test_probes_and_migrations.py`**, covering the four bugs above.
+  The one that matters most asserts that every setting the code refuses on is
+  named in the deployment guide: the drift between them is what caused two of
+  the four.
+- **`tests/unit/test_settings_from_environment.py`** — settings loaded the way
+  a deployment loads them, through environment variables, where everything is a
+  string. The rest of the suite constructs them in Python, where a list is
+  already a list, and that is exactly the gap the CORS bug lived in.
+
 - **`docker-compose.prod.yml`** and `.env.production.example` — a deployment
   anybody can run anywhere Docker runs. Deliberately a separate file rather
   than an override on `docker-compose.yml`: every convenience in the
@@ -38,6 +54,41 @@ codes and the `/api/v1` namespace are already treated as stable.
   published, the image tag is pinned and matches the packaged version.
 
 ### Fixed
+
+- **`.env.production.example` was never in the repository.** `.gitignore`
+  carries `.env.*` so nobody commits a filled-in environment file by accident,
+  and it swallowed the one file a deployer is told to copy. The file existed
+  locally, the deployment tests read it and passed, and a fresh clone would
+  have had neither. Un-ignored by name, with a test that asks `git` rather than
+  the filesystem — checking the file exists on disk is exactly the check that
+  was already passing.
+
+- **`flask db upgrade` had never worked.** The Alembic environment guarded
+  `fileConfig` on `config_file_name is not None`, and Flask-Migrate always sets
+  it — to `<migrations>/alembic.ini`, which this project does not have; its
+  config is at the repository root. `alembic upgrade head` run from the root
+  worked and hid it, so the runbook's command was fine and the README's
+  quickstart had been broken for every new user since it was written. Now
+  guarded on the file existing *and* carrying logging sections.
+- **Health probes were redirected to HTTPS**, so a container never reported
+  healthy. Every orchestrator — Kubernetes, ECS, a Docker healthcheck, a load
+  balancer — probes over plain HTTP from inside the network, where there is no
+  certificate and no proxy. The replica ran perfectly and sat in `starting`
+  forever, which is a stalled rolling deploy with nothing wrong. `/healthz`,
+  `/readyz`, and `/version` are now exempt from the redirect; nothing else is,
+  and they give nothing away beyond up or down.
+- **`CORS_ALLOWED_ORIGINS=https://example.com` made the application refuse to
+  boot.** pydantic-settings treats a `list` field as complex and runs
+  `json.loads` on the environment value *before* any validator sees it, so the
+  `mode="before"` validator written to split a comma-separated string was
+  unreachable from the environment — the only place the setting ever arrives
+  from. Annotated `NoDecode`, and the validator now reads both the comma form
+  and the JSON one rather than trading one break for the other.
+- **`DEPLOYMENT.md` §2 listed fewer refusals than the code enforces.**
+  `STORAGE_BACKEND=local`, `MAIL_BACKEND=console`, and disabled MFA are all
+  `ConfigError` at startup and none were named, so a deployer could satisfy the
+  published list and still not boot. The list is complete, and a test now
+  asserts every refusal in the code appears in it.
 
 - **The version said 0.5.0 with two 0.6 milestones shipped.** `/api/v1`
   reported a version that did not include the endpoints being called, which
