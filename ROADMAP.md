@@ -252,11 +252,12 @@ one thing that ADR forbids.
 
 ### Acceptance for the milestone
 
-- [ ] `NO_SURFACE` and `SEED_ONLY` in `tests/unit/test_service_reachability.py`
+- [x] `NO_SURFACE` and `SEED_ONLY` in `tests/unit/test_service_reachability.py`
       are both empty, and the guard is left in place so the next module cannot
       arrive unreachable.
-- [ ] `docs/FEATURES.md` has no **No surface** rows.
-- [ ] Every new surface is covered the way the portal write surfaces are: a
+- [x] `docs/FEATURES.md` has no **No surface** rows. The status appears only in
+      the legend that defines it.
+- [x] Every new surface is covered the way the portal write surfaces are: a
       happy path, a refusal the service raises and the surface must not swallow,
       and the same request aimed at another tenant's record returning 404.
 
