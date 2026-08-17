@@ -19,7 +19,7 @@ build when a module becomes unreachable without being recorded, and again when
 a recorded one is fixed and the entry is left behind. The table below and that
 file have to agree.
 
-**As of 0.6.0 no row carries that status.** Every service module has a surface
+**As of 0.7.0 no row carries that status.** Every service module has a surface
 a signed-in person can reach. The status stays defined because the guard is
 what keeps it empty — the next capability written service-first will land here
 until somebody gives it a way in.

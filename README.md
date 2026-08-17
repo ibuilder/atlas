@@ -95,7 +95,9 @@ revocation · login throttling and lockout · single-use password reset · hashe
 single sign-on with SCIM directory provisioning.
 
 **Leasing** — leads, guest cards, applications and screening from enquiry to signed lease, lease packets, and
-charge schedules driving recurring billing. Renewals and move-outs are modelled but have no workflow yet; see
+charge schedules driving recurring billing. Renewals, move-outs, and deposit disposition run end to end, with the
+statutory disposition clock starting when the move-out is recorded. An embeddable enquiry form drops into an
+operator's own website and files leads straight into the funnel. See
 [docs/FEATURES.md](docs/FEATURES.md), which states the status of every claim on this page.
 
 **Accounting** — segmented chart of accounts, double-entry journal, trust accounts, AR invoices, AP bills, payments
