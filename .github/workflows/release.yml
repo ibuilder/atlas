@@ -75,17 +75,26 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # By digest, not by tag. `github.ref_name` is `v0.7.0`; the tag actually
+      # published is `0.7.0`, because docker/metadata-action strips the `v` from
+      # a semver pattern. Asking for `:v0.7.0` got MANIFEST_UNKNOWN and took the
+      # scan and the draft release down with it, on a release whose image had
+      # already published perfectly well.
+      #
+      # The digest avoids re-deriving a name that is constructed somewhere else,
+      # and pins the exact artifact just pushed rather than whatever the tag
+      # points at by the time these steps run.
       - name: Generate SBOM for the published image
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          image: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
           format: spdx-json
           artifact-name: atlas-sbom.spdx.json
 
       - name: Scan the published image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          image-ref: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
           format: table
           severity: HIGH,CRITICAL
           # Reported rather than gating, matching CI. A base-image CVE
