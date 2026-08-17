@@ -1,0 +1,115 @@
+{# Embeddable enquiry forms.
+
+   The key here is shown in full, every time, unlike the SCIM token on the
+   identity-providers page. That difference is deliberate and worth the words:
+   this one is pasted into a public web page, so it is readable by anyone who
+   views source and is not a secret. Hiding it would suggest otherwise, and an
+   operator who learns to treat this key as sensitive learns nothing useful
+   about the one that genuinely is.
+
+   SPDX-License-Identifier: MIT #}
+{% extends "layouts/base.html" %}
+{% from "components/nav.html" import admin_nav with context %}
+{% block title %}Enquiry forms · {{ app_name }}{% endblock %}
+{% block heading %}Enquiry forms{% endblock %}
+{% block nav %}{{ admin_nav('embed_forms') }}{% endblock %}
+
+{% block topbar_meta %}
+{% set live = rows | selectattr('form.is_live') | list %}
+<span class="integrity"><span class="integrity__dot"></span>
+  {{ live | length }} live</span>
+{% endblock %}
+
+{% block content %}
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Publish a form</h2>
+    <span class="panel__hint">One per page that should collect enquiries</span>
+  </div>
+  <form method="post" action="{{ url_for('admin.embed_form_create') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <label for="label">Label</label>
+    <input type="text" id="label" name="label" maxlength="120" required
+           placeholder="Maple Court listing page">
+
+    <label for="property_id">Property</label>
+    <select id="property_id" name="property_id">
+      <option value="">Any &mdash; the enquiry is not tied to one property</option>
+      {% for property in properties %}
+        <option value="{{ property.id }}">{{ property.name }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="allowed_origins">Sites allowed to show this form</label>
+    <textarea id="allowed_origins" name="allowed_origins" rows="3" required
+              placeholder="https://www.yoursite.com"></textarea>
+    <p class="tiny muted">
+      One per line, as <code>https://www.yoursite.com</code> &mdash; scheme and
+      domain only, no path. The form refuses to load anywhere else, so somebody
+      copying your snippet cannot run it on their own site. Paste the address
+      of the page itself; we reduce it to the part a browser sends.
+    </p>
+
+    <button type="submit" class="btn btn--primary">Create form</button>
+  </form>
+</div>
+
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Your forms</h2>
+  </div>
+
+  {% if not rows %}
+    <p class="muted">No enquiry forms yet.</p>
+  {% else %}
+    {% for row in rows %}
+      <div class="panel__section">
+        <h3>
+          {{ row.form.label }}
+          {% if row.form.revoked_at %}
+            <span class="badge badge--muted">Revoked</span>
+          {% elif not row.form.enabled %}
+            <span class="badge badge--warn">Paused</span>
+          {% else %}
+            <span class="badge badge--ok">Live</span>
+          {% endif %}
+        </h3>
+
+        <p class="tiny muted">
+          {{ row.form.submission_count }} enquir{{ 'y' if row.form.submission_count == 1 else 'ies' }}
+          {%- if row.form.last_submission_at %}, most recently
+            {{ row.form.last_submission_at | datetime }}{% endif %}.
+          Shows on: {{ row.form.allowed_origins | join(', ') }}
+        </p>
+
+        {% if row.form.is_live %}
+          {# No `onclick="this.select()"`: the console's CSP has no
+             'unsafe-inline' and an inline handler is silently dropped, which
+             would look like a broken control rather than a blocked one. #}
+          <label for="snippet-{{ row.form.id }}">Paste this into your page</label>
+          <textarea id="snippet-{{ row.form.id }}" rows="4" readonly>{{ row.snippet }}</textarea>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('admin.embed_form_update', form_id=row.form.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% if not row.form.revoked_at %}
+            {% if row.form.enabled %}
+              <button type="submit" name="action" value="pause" class="btn">Pause</button>
+            {% else %}
+              <button type="submit" name="action" value="resume" class="btn">Resume</button>
+            {% endif %}
+            <button type="submit" name="action" value="revoke" class="btn btn--danger">Revoke</button>
+          {% else %}
+            <p class="tiny muted">
+              Revoked forms cannot be restored. The snippet may still sit in a
+              page you no longer control, so bringing one back would resurrect
+              a key you have already decided to retire.
+            </p>
+          {% endif %}
+        </form>
+      </div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endblock %}

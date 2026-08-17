@@ -65,6 +65,8 @@
   {% if can('integration.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.identity_providers') }}"
        {% if active == 'identity_providers' %}aria-current="page"{% endif %}>Single sign-on</a>
+    <a class="sidebar__link" href="{{ url_for('admin.embed_forms') }}"
+       {% if active == 'embed_forms' %}aria-current="page"{% endif %}>Enquiry forms</a>
   {% endif %}
   {% if can('role.read') %}
     <a class="sidebar__link" href="{{ url_for('admin.roles') }}"

@@ -12,6 +12,36 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ### Added
 
+- **Embeddable enquiry form** (`0.7.1`). An `<iframe>` snippet an operator
+  pastes into their own website; submissions arrive as leads in the existing
+  funnel. Managed at `/admin/embed-forms` behind `integration.manage`.
+
+  This is Atlas's first anonymous write surface, so the controls are the
+  feature. The publishable key names the organization — resolved through
+  `unscoped` before any tenant context exists — so a submission cannot claim
+  one. Framing is allow-listed per key via `frame-ancestors`, and a key with no
+  origins frames nowhere rather than everywhere. `Origin` is verified on write.
+  A honeypot field and a signed render token carrying a fill-time floor drop
+  automation, which then receives the same thank-you page a person does.
+
+  An iframe rather than a script tag, deliberately: serving from Atlas's origin
+  means an enquirer types into Atlas, so a cross-site scripting flaw on the
+  operator's marketing site cannot read the fields. And the form collects
+  nothing screening-grade — income, employment, and date of birth stay behind
+  authentication, so a cloned marketing page is never a route to them.
+
+  Revocation is terminal, because the snippet lives in a page the operator may
+  no longer control.
+- **`app/models/leasing.py::EmbedForm`** and migration `e3b9f04c7a18`, with the
+  row-level policy applied like every other tenant table — this one is reachable
+  from an unauthenticated request, so the ORM guard alone was not enough.
+- **`tests/security/test_embed_forms.py`** (41) and
+  **`tests/security/test_console_embed_forms.py`** (10). Among them: an
+  unknown key and a revoked key must answer identically, or the endpoint
+  becomes an oracle for which operators use Atlas; every *other* route must
+  still carry `X-Frame-Options: DENY`, which is the regression this feature
+  could plausibly cause; and the public form must never grow a field asking for
+  income or a date of birth.
 - **MinIO in the reference deployment**, so `docker-compose.prod.yml` can
   actually satisfy the object-storage requirement it is subject to. Production
   refuses local disk for documents — not durable across replicas, and a restore

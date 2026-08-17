@@ -1,0 +1,24 @@
+{# Shown after a submission is accepted - and, deliberately, after one is
+   silently rejected as automated. A bot that can tell it was caught is a bot
+   whose author tunes around the control on the next attempt, and there is no
+   honest submitter being misled: a person never triggers these checks.
+
+   SPDX-License-Identifier: MIT #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Thank you</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/embed.css') }}">
+</head>
+<body>
+<div class="embed-done">
+  <h1>Thank you</h1>
+  <p class="embed-intro">
+    We have your details and someone will be in touch shortly.
+  </p>
+</div>
+</body>
+</html>

@@ -18,11 +18,15 @@ __all__ = ["register_web_blueprints"]
 def register_web_blueprints(app: Flask, settings) -> None:  # noqa: ANN001
     from app.web.admin import admin_bp
     from app.web.auth import auth_bp
+    from app.web.embed import embed_bp
     from app.web.portals import owner_bp, resident_bp, vendor_bp
     from app.web.public import public_bp
 
     app.register_blueprint(public_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")
+    # Carries its own `/embed` prefix. Unauthenticated by design and the only
+    # surface permitted to render inside a third-party page.
+    app.register_blueprint(embed_bp)
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(resident_bp, url_prefix="/resident")
 

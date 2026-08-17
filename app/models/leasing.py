@@ -50,6 +50,7 @@ __all__ = [
     "Application",
     "ApplicationStatus",
     "ChargeFrequency",
+    "EmbedForm",
     "Lead",
     "LeadStatus",
     "Lease",
@@ -179,6 +180,58 @@ class Lead(TenantModel, SoftDeleteMixin):
         if self.first_contacted_at is None:
             return None
         return (self.first_contacted_at - self.created_at).total_seconds() / 3600
+
+
+class EmbedForm(TenantModel, SoftDeleteMixin):
+    """A lead-capture form an operator embeds in their own marketing website.
+
+    ``public_key`` is an identifier, not a credential. It ships in the page
+    source of whatever site embeds the form, so it is assumed to be readable by
+    anyone and is given exactly one capability: create a lead in one
+    organization. Nothing about the request can widen that, because the
+    organization is read from this row rather than from anything the submitter
+    can type.
+
+    Every abuse control hangs off this row for the same reason. An
+    unauthenticated request can claim any origin, any property, any name; the
+    only trustworthy facts are the key it presented and the address it came
+    from.
+    """
+
+    __tablename__ = "embed_forms"
+    __table_args__ = (
+        # Global rather than per-org: the key arrives before any organization is
+        # known, so it has to resolve to exactly one on its own.
+        UniqueConstraint("public_key", name="uq_embed_forms_public_key"),
+        Index("ix_embed_forms_org_enabled", "org_id", "enabled"),
+    )
+
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    public_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    #: Scopes captured leads to one property. Optional: a key without one is a
+    #: portfolio-wide form, and the applicant names the property they want.
+    property_id: Mapped[str | None] = mapped_column(
+        GUID, ForeignKey("properties.id", ondelete="CASCADE"), index=True
+    )
+
+    #: Origins permitted to frame this form, as scheme://host[:port]. Empty
+    #: means nobody: a key with no allowlist is inert rather than open, because
+    #: the failure of an allowlist has to be refusal.
+    allowed_origins: Mapped[list[str]] = mapped_column(JSONType, nullable=False, default=list)
+
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    #: Terminal, unlike ``enabled``. A revoked key is never served again even if
+    #: somebody re-enables it, so a leaked snippet cannot be resurrected.
+    revoked_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+
+    submission_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_submission_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime)
+
+    @property
+    def is_live(self) -> bool:
+        """Whether this key should still be answered at all."""
+        return self.enabled and self.revoked_at is None and not self.is_deleted
 
 
 class Application(TenantModel, SoftDeleteMixin):

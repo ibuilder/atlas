@@ -215,11 +215,12 @@ evidence anybody agreed; and a decision is now refused once an application is
 withdrawn, lapsed, or already converted, which the old "not already decided"
 test let through — approving over a live tenancy included.
 
-Still open, and deliberately: there is no *public* self-serve intake form. An
-application is taken by a signed-in agent or driven by an authenticated
-integration. A public form is an unauthenticated write surface and wants its own
-rate limiting, abuse handling, and identity story rather than a route bolted
-onto this one.
+This left one thing open, deliberately: there was no *public* self-serve intake.
+An application was taken by a signed-in agent or driven by an authenticated
+integration, because a public form is an unauthenticated write surface and wants
+its own rate limiting, abuse handling, and identity story rather than a route
+bolted onto this one. **That is now 0.7.1 below**, built with exactly that
+separate story rather than by relaxing this one.
 
 **6.2 — shipped.** It carried the most legal weight of anything on this list:
 the statutory disposition clock starts at the move-out, and a move-out could
@@ -267,6 +268,54 @@ Add capability. Every service in it is already written, tested, and — in nine
 cases out of ten — already exercised against realistic data by the demo seed.
 If something here turns out to need new domain logic, that is a finding worth
 recording rather than a licence to widen the milestone.
+
+---
+
+## 0.7.0 — Reach the market
+
+The theme: surfaces that face people who do not have an Atlas login. Everything
+before this assumed a signed-in operator or an authenticated integration.
+
+| # | Item | Size |
+|---|---|---|
+| ~~7.1~~ | ~~Embeddable enquiry form~~ | **Shipped** |
+
+**7.1 — shipped.** An operator pastes an `<iframe>` into their own marketing
+site and enquiries arrive as leads in the existing funnel. No new domain logic:
+a submission becomes a `Lead` with `source="embed"`, and 0.6.1's funnel takes it
+from there.
+
+The design decisions worth recording, because each has a cheaper alternative
+that is worse:
+
+*An iframe, not a script tag.* A widget rendering into the host page would
+inherit the operator's CSS exactly, which is what everybody asks for. It would
+also put every field inside a DOM that the operator's own site can read, and
+marketing sites acquire cross-site scripting flaws routinely. Serving from
+Atlas's origin means an enquirer types into Atlas. The widget remains a
+documented seam rather than a shipped path.
+
+*A short form, not an application.* Name, contact, optional message. Income,
+employment, and date of birth stay behind authentication. This is the whole
+compliance argument for having a public form at all: a defaced or cloned
+marketing page is never a route to screening-grade data.
+
+*The key names the tenant.* Resolved through `unscoped` before any context
+exists, then a context is bound to what the key says. A submission cannot name
+an organization, so there is nothing to forge.
+
+*Framing is allow-listed per key, and fails closed.* A key with no origins
+frames nowhere. An empty allowlist meaning "anybody" is the standard way an
+embed becomes an open relay into somebody's CRM.
+
+*Revocation is terminal.* The snippet sits in a page the operator may no longer
+control, so a leaked key must not be resurrectable by re-enabling it.
+
+Still open, and deliberately: no CAPTCHA. The honeypot, the signed render
+token, the fill-time floor, and the per-key rate limit are dependency-free and
+catch the automation that actually turns up. A CAPTCHA adds a third-party
+dependency, an accessibility cost, and a privacy story, and should be a
+deployer's decision rather than a default.
 
 ---
 

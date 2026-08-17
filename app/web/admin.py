@@ -1057,6 +1057,127 @@ def identity_provider_scim_token(provider_id: str) -> Response:
     return back
 
 
+@admin_bp.get("/embed-forms")
+@login_required
+def embed_forms() -> str:
+    """The enquiry forms this organization publishes, and the snippet for each.
+
+    The key is shown in full and repeatedly, unlike the SCIM token beside it.
+    That is not an inconsistency: this one is pasted into a public page and is
+    therefore readable by anyone who views source. Treating it as a secret
+    would teach operators the wrong lesson about the one next to it that is.
+    """
+    require(Perm.INTEGRATION_READ)
+    org_id = require_org_scope()
+
+    from app.models.leasing import EmbedForm
+    from app.services.leasing.embeds import snippet_for
+
+    forms = list(
+        db.session.execute(
+            select(EmbedForm)
+            .where(EmbedForm.org_id == org_id)
+            .order_by(EmbedForm.revoked_at.is_(None).desc(), EmbedForm.created_at.desc())
+        ).scalars()
+    )
+
+    return render_template(
+        "admin/embed_forms.html",
+        rows=[{"form": form, "snippet": snippet_for(form, base_url=request.host_url)} for form in forms],
+        properties=list(
+            db.session.execute(
+                select(Property).where(Property.org_id == org_id).order_by(Property.name)
+            ).scalars()
+        ),
+    )
+
+
+@admin_bp.post("/embed-forms")
+@login_required
+def embed_form_create() -> Response:
+    """Issue a key for one page of the operator's site."""
+    require(Perm.INTEGRATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.services.leasing.embeds import create_embed_form
+
+    back = redirect(url_for("admin.embed_forms"))
+    form = request.form
+
+    property_id = (form.get("property_id") or "").strip() or None
+    if property_id is not None:
+        record = db.session.get(Property, property_id)
+        # 404 rather than a validation message: an id from another tenant must
+        # not be distinguishable from one that was never real.
+        if record is None or record.org_id != org_id:
+            abort(404)
+
+    try:
+        create_embed_form(
+            current_session(),
+            org_id=org_id,
+            label=(form.get("label") or "").strip(),
+            # One per line is what an operator actually pastes.
+            allowed_origins=[
+                line.strip()
+                for line in (form.get("allowed_origins") or "").splitlines()
+                if line.strip()
+            ],
+            property_id=property_id,
+            actor_id=current_user.id,
+        )
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash("Form created. Copy the snippet into your site.", "success")
+    return back
+
+
+@admin_bp.post("/embed-forms/<id:form_id>")
+@login_required
+def embed_form_update(form_id: str) -> Response:
+    """Pause, resume, or permanently revoke a key."""
+    require(Perm.INTEGRATION_MANAGE)
+    org_id = require_org_scope()
+
+    from app.models.leasing import EmbedForm
+    from app.services.leasing.embeds import revoke_embed_form, update_embed_form
+
+    record = db.session.get(EmbedForm, form_id)
+    if record is None or record.org_id != org_id:
+        abort(404)
+
+    back = redirect(url_for("admin.embed_forms"))
+    action = (request.form.get("action") or "").strip().lower()
+
+    try:
+        if action == "revoke":
+            revoke_embed_form(current_session(), form=record, actor_id=current_user.id)
+            message = "Form revoked. The snippet no longer renders anywhere."
+        elif action in {"pause", "resume"}:
+            update_embed_form(
+                current_session(),
+                form=record,
+                enabled=(action == "resume"),
+                actor_id=current_user.id,
+            )
+            message = "Form paused." if action == "pause" else "Form live again."
+        else:
+            flash("That is not something you can do to a form.", "error")
+            return back
+        db.session.commit()
+    except AtlasError as exc:
+        db.session.rollback()
+        flash(str(exc), "error")
+        return back
+
+    flash(message, "success")
+    return back
+
+
 @admin_bp.get("/reconciliations")
 @login_required
 def reconciliations() -> str:

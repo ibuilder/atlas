@@ -1,0 +1,94 @@
+{# The embeddable enquiry form.
+
+   Deliberately does not extend layouts/base.html. This document renders inside
+   a third party's page, so it carries no console navigation, no branding beyond
+   the operator's own name, and - because the response sets `script-src 'none'`
+   - no JavaScript of any kind. A form that needs script to submit is a form
+   that fails silently for the people most likely to be using an old browser.
+
+   SPDX-License-Identifier: MIT #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{# Nothing here should ever appear in a search index: it is a fragment of
+   somebody else's page, and indexing it would compete with them for their own
+   listing. #}
+<meta name="robots" content="noindex, nofollow">
+<title>Enquire{% if form.label %} &mdash; {{ form.label }}{% endif %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/embed.css') }}">
+</head>
+<body>
+<h1>Register your interest</h1>
+<p class="embed-intro">Leave your details and someone will be in touch.</p>
+
+{% if errors %}
+<div class="embed-errors" role="alert">
+  <ul>
+    {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('embed.submit', public_key=form.public_key) }}">
+  {# Signed at render, checked at submit. Proves the form was actually served
+     rather than posted blind, and carries the timestamp the fill-time check
+     measures against. #}
+  <input type="hidden" name="{{ timestamp_field }}" value="{{ rendered_token }}">
+
+  {# The honeypot. `aria-hidden` and `tabindex="-1"` keep it away from screen
+     readers and keyboard navigation, so it is invisible to every human route
+     through the form while remaining present in the DOM a bot parses. #}
+  <div class="embed-hp" aria-hidden="true">
+    <label for="{{ honeypot_field }}">Company website</label>
+    <input type="text" id="{{ honeypot_field }}" name="{{ honeypot_field }}"
+           tabindex="-1" autocomplete="off">
+  </div>
+
+  <div class="embed-field">
+    <label for="first_name">First name</label>
+    <input type="text" id="first_name" name="first_name" maxlength="100" required
+           autocomplete="given-name" value="{{ values.get('first_name', '') }}">
+  </div>
+
+  <div class="embed-field">
+    <label for="last_name">Last name <span class="embed-optional">(optional)</span></label>
+    <input type="text" id="last_name" name="last_name" maxlength="100"
+           autocomplete="family-name" value="{{ values.get('last_name', '') }}">
+  </div>
+
+  <div class="embed-field">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" maxlength="320"
+           autocomplete="email" value="{{ values.get('email', '') }}">
+  </div>
+
+  <div class="embed-field">
+    <label for="phone">Phone</label>
+    <input type="tel" id="phone" name="phone" maxlength="40"
+           autocomplete="tel" value="{{ values.get('phone', '') }}">
+  </div>
+
+  <div class="embed-field">
+    <label for="desired_move_in">
+      Preferred move-in date <span class="embed-optional">(optional)</span>
+    </label>
+    <input type="date" id="desired_move_in" name="desired_move_in"
+           value="{{ values.get('desired_move_in', '') }}">
+  </div>
+
+  <div class="embed-field">
+    <label for="message">Anything else? <span class="embed-optional">(optional)</span></label>
+    <textarea id="message" name="message" maxlength="2000">{{ values.get('message', '') }}</textarea>
+  </div>
+
+  <button type="submit">Send enquiry</button>
+</form>
+
+<p class="embed-note">
+  We only need a name and one way to reach you &mdash; an email address or a
+  phone number.
+</p>
+</body>
+</html>

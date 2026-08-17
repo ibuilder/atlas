@@ -173,7 +173,17 @@ def _apply_security_headers(response: Response, settings: Any) -> None:
     headers = response.headers
     headers.setdefault("X-Content-Type-Options", "nosniff")
     headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    headers.setdefault("X-Frame-Options", "DENY")
+    # The embeddable enquiry form is the one surface meant to load inside
+    # somebody else's page, and it sets a `frame-ancestors` allowlist of its
+    # own. `X-Frame-Options` cannot express an allowlist - `ALLOW-FROM` was
+    # removed from every browser - so reinstating `DENY` here would either be
+    # ignored in favour of the CSP or break the form, depending on the client.
+    # The flag is set by the view rather than inferred from the path, so a new
+    # route cannot become framable by being named the right thing.
+    if getattr(g, "embed_framing_allowed", False):
+        headers.pop("X-Frame-Options", None)
+    else:
+        headers.setdefault("X-Frame-Options", "DENY")
     headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
     headers.setdefault(

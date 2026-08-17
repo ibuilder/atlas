@@ -195,6 +195,9 @@ class AuditAction:
     WEBHOOK_DELIVERED = "webhook.delivered"
     WEBHOOK_FAILED = "webhook.failed"
     INTEGRATION_CONFIGURED = "integration.configured"
+    EMBED_FORM_CREATED = "embed.form_created"
+    EMBED_FORM_UPDATED = "embed.form_updated"
+    EMBED_FORM_REVOKED = "embed.form_revoked"
     DATA_EXPORTED = "data.exported"
     PII_ACCESSED = "privacy.pii_accessed"
 

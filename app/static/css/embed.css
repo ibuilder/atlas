@@ -1,0 +1,118 @@
+/* Styles for the embeddable enquiry form.
+ *
+ * A separate sheet rather than a slice of atlas.css. This page renders inside
+ * somebody else's site, so it needs to look like a neutral form rather than
+ * like a fragment of the Atlas console - and it must not inherit console
+ * chrome that would arrive looking broken at 320px wide in a sidebar.
+ *
+ * No inline styles anywhere: the embed response sets `script-src 'none'` and
+ * a `style-src 'self'` that admits this file and nothing else.
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+:root {
+  --embed-fg: #1a1d21;
+  --embed-muted: #5b6470;
+  --embed-bg: #ffffff;
+  --embed-line: #d5dae1;
+  --embed-accent: #1f5f8b;
+  --embed-error: #a02020;
+  --embed-ok: #1d6f42;
+  --embed-radius: 6px;
+}
+
+/* The host page decides light or dark; matching it is better than fighting it.
+   Both palettes are defined explicitly so the frame never renders transparent
+   over an unknown background. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --embed-fg: #e8ebef;
+    --embed-muted: #9aa4b1;
+    --embed-bg: #16191d;
+    --embed-line: #333a42;
+    --embed-accent: #6fb3e0;
+    --embed-error: #ef8b8b;
+    --embed-ok: #77c79a;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 1.25rem;
+  background: var(--embed-bg);
+  color: var(--embed-fg);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+h1 { font-size: 1.25rem; margin: 0 0 0.25rem; }
+
+.embed-intro { color: var(--embed-muted); margin: 0 0 1.25rem; font-size: 0.95rem; }
+
+.embed-field { margin-bottom: 0.9rem; }
+
+label { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+
+.embed-optional { font-weight: 400; color: var(--embed-muted); }
+
+input, textarea {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+  color: inherit;
+  background: var(--embed-bg);
+  border: 1px solid var(--embed-line);
+  border-radius: var(--embed-radius);
+}
+
+input:focus, textarea:focus {
+  outline: 2px solid var(--embed-accent);
+  outline-offset: 1px;
+  border-color: var(--embed-accent);
+}
+
+textarea { min-height: 5.5rem; resize: vertical; }
+
+button {
+  width: 100%;
+  padding: 0.7rem 1rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--embed-accent);
+  border: 0;
+  border-radius: var(--embed-radius);
+  cursor: pointer;
+}
+
+button:hover { filter: brightness(1.08); }
+
+.embed-errors {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--embed-error);
+  border-radius: var(--embed-radius);
+  color: var(--embed-error);
+  font-size: 0.9rem;
+}
+
+.embed-errors ul { margin: 0; padding-left: 1.1rem; }
+
+.embed-note { margin-top: 1rem; font-size: 0.8rem; color: var(--embed-muted); }
+
+.embed-done { text-align: center; padding: 2rem 1rem; }
+.embed-done h1 { color: var(--embed-ok); }
+
+/* The honeypot. Hidden from sight and from assistive technology, so no human
+   is ever offered it, while a scraper parsing the DOM fills it in and marks
+   itself. `display:none` alone is skipped by some bots specifically because it
+   is the obvious tell, hence taking it out of flow instead. */
+.embed-hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
