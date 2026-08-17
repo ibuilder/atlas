@@ -24,7 +24,7 @@
 name: atlas
 
 x-app: &app
-  image: ${ATLAS_IMAGE:-ghcr.io/ibuilder/atlas:0.6.0}
+  image: ${ATLAS_IMAGE:-ghcr.io/ibuilder/atlas:0.7.0}
   restart: unless-stopped
   environment: &app-env
     ATLAS_ENV: production

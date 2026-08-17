@@ -14,7 +14,7 @@ body:
     attributes:
       label: Version
       description: The `version` from `/api/v1` or your image tag.
-      placeholder: "0.6.0"
+      placeholder: "0.7.0"
     validations:
       required: true
 

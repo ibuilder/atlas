@@ -10,6 +10,16 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-17
+
+The first release with a published image. 0.6.0 below was tagged in this file
+and never in git, so no artifact was ever built from it — and it should not be
+now: that tree still contains the five deployment faults found immediately
+afterwards, including `flask db upgrade` failing on a logging-config lookup and
+the health probes redirecting to HTTPS so containers never reported ready.
+Publishing it retroactively would ship a release known not to deploy. Its
+contents are carried forward here instead.
+
 ### Added
 
 - **Embeddable enquiry form** (`0.7.1`). An `<iframe>` snippet an operator
@@ -128,6 +138,11 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 
 ## [0.6.0] - 2026-08-15
+
+> **Never tagged, never built.** This section records the milestone as it was
+> completed, but no `v0.6.0` tag exists and no image was published for it. The
+> deployment faults found straight afterwards mean that tree does not deploy,
+> so nothing is gained by tagging it now. Everything here ships in 0.7.0.
 
 **Make it operable.** Ten service modules were implemented, tested, and
 reachable by nothing a user could get to — whole capabilities that existed in
@@ -926,6 +941,7 @@ The first release: an enterprise core that runs, migrates, and is tested.
 - Aggregate queries (`SELECT count(*)`) are scoped explicitly, closing a gap
   that ORM loader criteria alone do not cover.
 
-[Unreleased]: https://github.com/ibuilder/atlas/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/ibuilder/atlas/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/ibuilder/atlas/compare/v0.5.0...v0.7.0
 [0.5.0]: https://github.com/ibuilder/atlas/compare/v0.1.0...v0.5.0
 [0.1.0]: https://github.com/ibuilder/atlas/releases/tag/v0.1.0
