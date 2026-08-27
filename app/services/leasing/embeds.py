@@ -43,6 +43,7 @@ from app.errors import NotFound, ValidationFailed
 from app.logging import get_logger
 from app.models.audit import AuditAction
 from app.models.leasing import EmbedForm, Lead, LeadStatus
+from app.models.org import Property, Unit
 from app.models.types import utcnow
 from app.services.audit.recorder import record_audit_event
 
@@ -307,11 +308,15 @@ def capture_lead(
     if clean_email and "@" not in clean_email:
         raise ValidationFailed("That does not look like an email address.")
 
-    # A key scoped to a property pins every lead to it. An unscoped key may
-    # take one from the submission, but only after the caller has checked it
-    # belongs to this organization - the tenant guard makes an outside id
-    # unfindable rather than merely unauthorized.
-    resolved_property = form.property_id or property_id
+    # A key scoped to a property pins every lead to it; an unscoped key may
+    # take one from the submission. Either way the id is verified here rather
+    # than trusted from the caller. Leaving that to a docstring was a real
+    # hazard: PostgreSQL does not apply row-level security to foreign-key
+    # checks, so a reference to another tenant's property would insert happily
+    # instead of failing closed, and the ORM guard would not see it because the
+    # write itself is correctly scoped to this organization.
+    resolved_property = form.property_id or _in_this_org(session, Property, property_id, form.org_id)
+    resolved_unit = _in_this_org(session, Unit, unit_id, form.org_id)
 
     lead = Lead(
         org_id=form.org_id,
@@ -324,7 +329,7 @@ def capture_lead(
         source_detail=(origin or form.label)[:120],
         status=LeadStatus.NEW,
         property_id=resolved_property,
-        unit_id=unit_id,
+        unit_id=resolved_unit,
         desired_move_in=desired_move_in,
         notes=((message or "").strip() or None),
         attributes={"embed_form_id": form.id, "embed_origin": origin},
@@ -367,6 +372,21 @@ def snippet_for(form: EmbedForm, *, base_url: str) -> str:
         f'        style="width:100%;max-width:640px;height:720px;border:0"\n'
         f'        loading="lazy"></iframe>'
     )
+
+
+def _in_this_org(session: Session, model: type, record_id: str | None, org_id: str) -> str | None:
+    """Return the id only if it names a row this organization owns.
+
+    A foreign id is refused rather than dropped. Silently nulling it would file
+    the lead against no property at all, which reads as an Atlas bug to whoever
+    picks it up; refusing says the submission was wrong.
+    """
+    if not record_id:
+        return None
+    record = session.get(model, record_id)
+    if record is None or record.org_id != org_id:
+        raise NotFound("No such property or unit.")
+    return record_id
 
 
 def _normalized_origins(raw: list[str]) -> list[str]:

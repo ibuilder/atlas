@@ -71,16 +71,27 @@ def embed_form(db, org, scope, property_record):
     return form
 
 
-def _rendered_token(app, public_key, *, age_seconds: float = 30.0, salt="atlas.embed.render"):
+def _rendered_token(
+    app,
+    public_key,
+    *,
+    age_seconds: float = 30.0,
+    salt="atlas.embed.render",
+    origin: str | None = ORIGIN,
+):
     """Mint the signed render marker the form would have carried.
 
     Built rather than scraped so a test can place it at an arbitrary age
     without sleeping, which is the only way to exercise the fill-time floor.
+
+    ``origin`` is what the server recorded from the referrer when it rendered
+    the form. It lives inside the signature precisely because the submission
+    cannot be asked for it - see the module docstring.
     """
     from itsdangerous import URLSafeTimedSerializer
 
     serializer = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt=salt)
-    return serializer.dumps({"k": public_key, "t": time.time() - age_seconds})
+    return serializer.dumps({"k": public_key, "t": time.time() - age_seconds, "o": origin})
 
 
 def _submission(app, public_key, **overrides):
@@ -189,7 +200,6 @@ def test_a_submission_becomes_a_lead_in_the_keys_organization(app, client, org, 
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key),
-        headers={"Origin": ORIGIN},
     )
     assert response.status_code == 200
     assert b"Thank you" in response.data
@@ -206,31 +216,94 @@ def test_a_lead_never_lands_in_a_neighbouring_organization(app, client, org, oth
     client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key),
-        headers={"Origin": ORIGIN},
     )
     assert len(_leads(org)) == 1
     assert _leads(other_org) == []
 
 
-@pytest.mark.parametrize("origin", [OTHER_ORIGIN, ""])
-def test_a_submission_from_an_unlisted_origin_is_refused(app, client, org, embed_form, origin):
-    """A browser attaches Origin to cross-site posts and page script cannot
-    strip it, so an absent one is a non-browser client."""
-    headers = {"Origin": origin} if origin else {}
+@pytest.mark.parametrize(
+    ("label", "headers"),
+    [
+        # Firefox omits Origin on a same-origin POST.
+        ("no Origin header at all", {}),
+        # Chrome sends Atlas's own origin, because that is where the iframe
+        # document lives. Never the embedding site.
+        ("Atlas's own origin", {"Origin": "http://localhost"}),
+    ],
+)
+def test_a_real_browser_submission_is_accepted(app, client, org, embed_form, label, headers):
+    """The regression test for the bug this whole surface shipped with.
+
+    The form is served from Atlas and posts back to Atlas, so the submission is
+    same-origin and the `Origin` header is either absent or Atlas's own host.
+    An earlier version compared that header against the *embedding site's*
+    allowlist, which no browser ever satisfies, so every genuine enquiry
+    returned 404 while the suite stayed green - because the tests forged a
+    header no browser sends.
+
+    Both shapes below are what really arrives, and both must capture a lead.
+    """
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key),
         headers=headers,
     )
-    assert response.status_code == 404
+    assert response.status_code == 200, f"{label} was rejected"
+    assert len(_leads(org)) == 1, f"{label} captured no lead"
+
+
+def test_a_form_rendered_somewhere_unlisted_is_dropped(app, client, org, embed_form):
+    """The origin check that can actually mean something.
+
+    Taken from the referrer when the form was rendered and sealed into the
+    signed token, so it describes where the form really was rather than what
+    the submitter claims. `frame-ancestors` should have refused this already;
+    this is the server-side backstop for a client that ignored it.
+    """
+    response = client.post(
+        f"/embed/f/{embed_form.public_key}",
+        data=_submission(
+            app,
+            embed_form.public_key,
+            rendered_at=_rendered_token(app, embed_form.public_key, origin=OTHER_ORIGIN),
+        ),
+    )
+    assert response.status_code == 200
     assert _leads(org) == []
+
+
+def test_a_withheld_referrer_still_captures_the_lead(app, client, org, embed_form):
+    """Privacy tooling and referrer policies suppress it routinely. Attribution
+    is worth having and not worth losing an enquiry over."""
+    client.post(
+        f"/embed/f/{embed_form.public_key}",
+        data=_submission(
+            app,
+            embed_form.public_key,
+            rendered_at=_rendered_token(app, embed_form.public_key, origin=None),
+        ),
+    )
+    leads = _leads(org)
+    assert len(leads) == 1
+    # Falls back to the form's label rather than recording nothing.
+    assert leads[0].source_detail == "Maple Court listing page"
+
+
+def test_the_recorded_origin_cannot_be_asserted_by_the_submitter(app, client, org, embed_form):
+    """A form field named after it must not be believed."""
+    client.post(
+        f"/embed/f/{embed_form.public_key}",
+        data=_submission(app, embed_form.public_key, origin=OTHER_ORIGIN),
+    )
+    leads = _leads(org)
+    assert len(leads) == 1
+    assert leads[0].source_detail == ORIGIN
 
 
 def test_a_missing_contact_route_is_refused_with_a_reason(app, client, org, embed_form):
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, email="", phone=""),
-        headers={"Origin": ORIGIN},
     )
     assert response.status_code == 400
     assert b"email address or a phone number" in response.data
@@ -241,7 +314,6 @@ def test_a_nameless_submission_is_refused(app, client, org, embed_form):
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, first_name=""),
-        headers={"Origin": ORIGIN},
     )
     assert response.status_code == 400
     assert _leads(org) == []
@@ -262,7 +334,6 @@ def test_an_automated_submission_is_dropped(app, client, org, embed_form, label,
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, **overrides),
-        headers={"Origin": ORIGIN},
     )
     # Same page a person gets. A bot that learns it was caught is a bot whose
     # author tunes around the control next time.
@@ -276,7 +347,6 @@ def test_a_submission_faster_than_a_human_is_dropped(app, client, org, embed_for
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, rendered_at=fresh),
-        headers={"Origin": ORIGIN},
     )
     assert response.status_code == 200
     assert _leads(org) == []
@@ -296,7 +366,6 @@ def test_a_token_minted_for_another_form_is_dropped(app, client, db, org, scope,
         data=_submission(
             app, embed_form.public_key, rendered_at=_rendered_token(app, second.public_key)
         ),
-        headers={"Origin": ORIGIN},
     )
     assert response.status_code == 200
     assert _leads(org) == []
@@ -309,7 +378,6 @@ def test_a_token_signed_with_the_wrong_salt_is_dropped(app, client, org, embed_f
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, rendered_at=forged),
-        headers={"Origin": ORIGIN},
     )
     assert response.status_code == 200
     assert _leads(org) == []
@@ -334,7 +402,6 @@ def test_the_captured_lead_records_where_it_came_from(app, client, org, embed_fo
     client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key),
-        headers={"Origin": ORIGIN},
     )
     lead = _leads(org)[0]
     assert lead.source_detail == ORIGIN
@@ -349,7 +416,6 @@ def test_the_property_comes_from_the_key_not_the_submission(
     client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, property_id="anything-at-all"),
-        headers={"Origin": ORIGIN},
     )
     assert _leads(org)[0].property_id == property_record.id
 
@@ -358,7 +424,6 @@ def test_a_submission_advances_the_forms_counters(app, client, db, org, scope, e
     client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key),
-        headers={"Origin": ORIGIN},
     )
     db.session.refresh(embed_form)
     assert embed_form.submission_count == 1
@@ -370,7 +435,6 @@ def test_an_overlong_field_is_refused_rather_than_truncated(app, client, org, em
     response = client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, phone="9" * 200),
-        headers={"Origin": ORIGIN},
     )
     assert response.status_code == 400
     assert _leads(org) == []
@@ -459,7 +523,6 @@ def test_a_desired_move_in_date_survives_the_round_trip(app, client, org, embed_
     client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, desired_move_in="2026-09-01"),
-        headers={"Origin": ORIGIN},
     )
     assert _leads(org)[0].desired_move_in == dt.date(2026, 9, 1)
 
@@ -470,8 +533,74 @@ def test_an_unparseable_date_does_not_cost_the_lead(app, client, org, embed_form
     client.post(
         f"/embed/f/{embed_form.public_key}",
         data=_submission(app, embed_form.public_key, desired_move_in="next spring"),
-        headers={"Origin": ORIGIN},
     )
     leads = _leads(org)
     assert len(leads) == 1
     assert leads[0].desired_move_in is None
+
+
+def test_a_property_from_another_tenant_is_refused(db, org, other_org, scope):
+    """The hazard a docstring used to guard.
+
+    PostgreSQL does not apply row-level security to foreign-key checks, so a
+    reference to somebody else's property would insert cleanly rather than fail
+    closed - and the ORM guard would not object either, because the write is
+    correctly scoped to *this* organization. The id has to be verified, not
+    trusted, even though no caller passes one today.
+    """
+    from app.context import clear_context
+    from app.errors import NotFound
+    from app.models.org import Property, PropertyType
+    from app.services.leasing import embeds
+
+    token = _rebound(other_org)
+    try:
+        theirs = Property(
+            org_id=other_org.id,
+            name="Rival Tower",
+            code="RIV2",
+            property_type=PropertyType.RESIDENTIAL_MULTI,
+            address_line1="1 Rival Way",
+            city="Springfield",
+            region="IL",
+            postal_code="62701",
+        )
+        db.session.add(theirs)
+        db.session.commit()
+        foreign_id = theirs.id
+    finally:
+        clear_context(token)
+
+    # A portfolio-wide key: nothing pins the property, so the argument is used.
+    portfolio_key = embeds.create_embed_form(
+        db.session, org_id=org.id, label="Portfolio", allowed_origins=[ORIGIN]
+    )
+    db.session.commit()
+
+    with pytest.raises(NotFound):
+        embeds.capture_lead(
+            db.session,
+            form=portfolio_key,
+            first_name="Dana",
+            email="dana@example.com",
+            property_id=foreign_id,
+        )
+
+
+def test_a_property_from_this_tenant_is_accepted(db, org, scope, property_record):
+    """The other half: the check must not refuse a legitimate id."""
+    from app.services.leasing import embeds
+
+    portfolio_key = embeds.create_embed_form(
+        db.session, org_id=org.id, label="Portfolio", allowed_origins=[ORIGIN]
+    )
+    db.session.commit()
+
+    lead = embeds.capture_lead(
+        db.session,
+        form=portfolio_key,
+        first_name="Dana",
+        email="dana@example.com",
+        property_id=property_record.id,
+    )
+    assert lead.property_id == property_record.id

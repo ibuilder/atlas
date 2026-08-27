@@ -8,7 +8,7 @@ stale plugin, most often — cannot read what is being typed. A script tag that
 rendered the form into the host page would put every field within reach of
 whatever else runs there.
 
-Four controls stand between this route and an open spam relay, and none of them
+Several controls stand between this route and an open spam relay, and none of them
 trusts the request:
 
 **The key decides the organization.** Resolved through ``unscoped`` because no
@@ -19,8 +19,19 @@ The submitter cannot name an organization, so there is nothing to forge.
 key's origins, so a snippet lifted from one operator's page source will not
 render on somebody else's site. A key with no origins frames nowhere.
 
-**Origin is checked on write.** A browser sends ``Origin`` on cross-site POSTs
-and cannot be talked out of it by page script.
+**The embedding page is identified once, at render, and then sealed.** It is
+readable only there — the referrer on that request is the parent document,
+while on the submission that follows it is this iframe — so it is captured and
+signed into the render token rather than re-derived later.
+
+There is deliberately **no ``Origin`` header check on the submission**, and the
+absence is a correction. This form posts back to the origin that served it, so
+the submission is same-origin: a browser sends Atlas's own host or omits the
+header entirely. Neither is ever the embedding site, which is not party to that
+request at all. An earlier version compared the header against the allowlist
+and consequently refused every genuine enquiry, while its tests passed by
+forging a header no browser sends. ``frame-ancestors`` is what really confines
+the form, and the browser enforces it before a key is pressed.
 
 **Bots are filtered before the database.** A honeypot field no human sees, and
 a signed timestamp proving the form was actually rendered and then took a human
@@ -47,7 +58,7 @@ from flask import Blueprint, Response, current_app, g, render_template, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.context import system_context, use_context
-from app.errors import NotFound, ValidationFailed
+from app.errors import ValidationFailed
 from app.extensions import csrf, current_session, db, limiter, talisman
 from app.logging import get_logger
 from app.models.base import unscoped
@@ -78,13 +89,19 @@ _TIMESTAMP_FIELD = "rendered_at"
 def form(public_key: str) -> Response:
     """Render the form for a key, framable only by that key's origins."""
     embed_form = _resolve(public_key)
+    # The only moment the embedding page's origin is knowable. On this request
+    # the referrer is the parent document; on the submission that follows it is
+    # this iframe. Captured here and signed into the token so the submission can
+    # still say where it came from.
+    parent = _parent_origin()
+
     with use_context(system_context("embed", org_id=embed_form.org_id)):
         html = render_template(
             "embed/form.html",
             form=embed_form,
             honeypot_field=_HONEYPOT_FIELD,
             timestamp_field=_TIMESTAMP_FIELD,
-            rendered_token=_issue_render_token(embed_form.public_key),
+            rendered_token=_issue_render_token(embed_form.public_key, parent),
             errors=[],
             values={},
         )
@@ -99,17 +116,21 @@ def submit(public_key: str) -> Response:
     embed_form = _resolve(public_key)
     origins = embed_form.allowed_origins
 
-    # A browser attaches Origin to every cross-site POST and page script cannot
-    # remove it. Absent means a non-browser client, which is not what this
-    # surface is for.
-    origin = (request.headers.get("Origin") or "").rstrip("/")
-    if origin not in origins:
-        log.warning(
-            "embed.origin_rejected",
-            extra={"public_key": embed_form.public_key, "origin": origin or "(absent)"},
-        )
-        raise NotFound("No such form.")
-
+    # There is deliberately no `Origin` check here, and the absence is the
+    # correction of a real bug rather than a relaxation.
+    #
+    # This form is served from Atlas's own origin and posts back to it, so the
+    # submission is *same-origin*: a browser sends `Origin: <atlas>` — its own
+    # host — or omits the header entirely, which Firefox does for same-origin
+    # posts. Neither value is ever the embedding site's origin, because the
+    # embedding site is not party to this request. Comparing the header against
+    # the allowlist therefore rejected every genuine submission while the tests
+    # passed, because the tests forged a header no browser sends.
+    #
+    # `frame-ancestors` is the control that actually does this job, is enforced
+    # by the browser before a keystroke is typed, and is already applied on the
+    # render. What can be checked here is the origin recorded at render time and
+    # signed, which `_bot_signals` does.
     values = {
         "first_name": (request.form.get("first_name") or "").strip(),
         "last_name": (request.form.get("last_name") or "").strip(),
@@ -119,7 +140,10 @@ def submit(public_key: str) -> Response:
         "message": (request.form.get("message") or "").strip(),
     }
 
-    silent_rejection = _bot_signals(embed_form.public_key)
+    # The origin comes back from the signed token rather than from a header:
+    # it was recorded when the form was rendered, and the signature is what
+    # makes it evidence instead of a claim.
+    silent_rejection, signed_origin = _bot_signals(embed_form.public_key, origins)
     errors: list[str] = []
     lead = None
 
@@ -135,7 +159,7 @@ def submit(public_key: str) -> Response:
                     phone=values["phone"] or None,
                     desired_move_in=_parse_date(values["desired_move_in"]),
                     message=values["message"] or None,
-                    origin=origin,
+                    origin=signed_origin,
                 )
                 db.session.commit()
         except ValidationFailed as failure:
@@ -149,7 +173,9 @@ def submit(public_key: str) -> Response:
                 form=embed_form,
                 honeypot_field=_HONEYPOT_FIELD,
                 timestamp_field=_TIMESTAMP_FIELD,
-                rendered_token=_issue_render_token(embed_form.public_key),
+                # Re-issued with the origin carried forward, so a corrected
+                # resubmission is still attributed to the page it came from.
+                rendered_token=_issue_render_token(embed_form.public_key, signed_origin),
                 errors=errors,
                 values=values,
             )
@@ -221,34 +247,70 @@ def _embed_csp(origins: list[str]) -> str:
     )
 
 
-def _issue_render_token(public_key: str) -> str:
-    """A signed marker that this form was rendered, and when.
+def _parent_origin() -> str | None:
+    """The origin of the page framing this form, if the browser disclosed it.
+
+    Read from the referrer on the *render*, which is the parent document. The
+    site's referrer policy is ``strict-origin-when-cross-origin``, so a
+    cross-site framing sends exactly the origin and nothing more.
+
+    Best-effort by nature: a parent page can suppress the referrer entirely,
+    and privacy tooling does. Absent is therefore an ordinary outcome and never
+    a refusal — attribution is worth having and not worth losing a lead over.
+    """
+    referrer = request.headers.get("Referer") or ""
+    if not referrer:
+        return None
+    try:
+        return embeds.normalize_origin(referrer)
+    except Exception:  # noqa: BLE001 - a referrer is not ours to validate
+        return None
+
+
+def _issue_render_token(public_key: str, parent_origin: str | None) -> str:
+    """A signed marker that this form was rendered, when, and inside what.
 
     Bound to the key so a token minted against one form cannot be replayed
-    against another, and signed so the clock cannot simply be edited in the
-    DOM before posting.
+    against another, and signed so neither the clock nor the recorded origin
+    can be edited in the DOM before posting.
     """
-    return _serializer().dumps({"k": public_key, "t": time.time()})
+    return _serializer().dumps({"k": public_key, "t": time.time(), "o": parent_origin})
 
 
-def _bot_signals(public_key: str) -> str | None:
-    """Name the automation signal, or ``None`` for a submission that looks human."""
+def _bot_signals(public_key: str, allowed_origins: list[str]) -> tuple[str | None, str | None]:
+    """Classify a submission, and return the origin its token vouches for.
+
+    Returns ``(signal, origin)``. ``signal`` names the automation trait that
+    caught it, or ``None`` if it looks human.
+    """
     if (request.form.get(_HONEYPOT_FIELD) or "").strip():
-        return "honeypot"
+        return "honeypot", None
 
     token = request.form.get(_TIMESTAMP_FIELD) or ""
     try:
         payload = _serializer().loads(token, max_age=embeds.MAX_FILL_SECONDS)
     except SignatureExpired:
-        return "stale_token"
+        return "stale_token", None
     except BadSignature:
-        return "unsigned_token"
+        return "unsigned_token", None
 
-    if payload.get("k") != public_key:
-        return "token_for_another_form"
-    if time.time() - float(payload.get("t", 0)) < embeds.MIN_FILL_SECONDS:
-        return "too_fast"
-    return None
+    if not isinstance(payload, dict) or payload.get("k") != public_key:
+        return "token_for_another_form", None
+    try:
+        rendered_at = float(payload.get("t") or 0)
+    except (TypeError, ValueError):
+        return "unsigned_token", None
+    if time.time() - rendered_at < embeds.MIN_FILL_SECONDS:
+        return "too_fast", None
+
+    # Recorded at render, signed, so it cannot be asserted by the submitter.
+    # An origin that is present and not allow-listed means the form rendered
+    # somewhere `frame-ancestors` should have refused — worth dropping, while
+    # an absent one stays acceptable because referrers are routinely withheld.
+    origin = payload.get("o")
+    if origin is not None and origin not in allowed_origins:
+        return "origin_not_allowed", None
+    return None, origin
 
 
 def _serializer() -> URLSafeTimedSerializer:
