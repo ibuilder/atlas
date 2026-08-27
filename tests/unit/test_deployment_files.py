@@ -182,3 +182,47 @@ def test_no_tracked_text_file_carries_a_bom_or_mojibake():
             offenders.append(f"{name}: {run!r} should be {repaired!r}")
 
     assert not offenders, "Encoding damage in tracked files:\n  " + "\n  ".join(sorted(offenders))
+
+
+def test_the_proxy_count_is_documented_everywhere_a_deployer_looks():
+    """A safe default that is wrong for the reference deployment.
+
+    `TRUSTED_PROXY_COUNT` defaults to 0, which is correct with nothing in front
+    - trusting `X-Forwarded-For` without a proxy lets any client name its own
+    address. But the production compose binds the web port to loopback
+    *precisely* so a proxy is in front, and while the setting stays 0 every
+    request appears to come from that proxy.
+
+    That address is not decoration. It is the FCRA screening-consent record,
+    the per-address rate-limit key, every audit event's IP, and what an
+    IP-restricted API token is checked against. Silently wrong in all four.
+
+    It was documented in `.env.example` and in none of the three files a
+    production deployer reads, which is how a setting with a safe default
+    becomes a quiet misconfiguration.
+    """
+    for path in (PROD, EXAMPLE, ROOT / "DEPLOYMENT.md"):
+        assert "TRUSTED_PROXY_COUNT" in path.read_text(encoding="utf-8"), (
+            f"{path.name} does not mention TRUSTED_PROXY_COUNT. A deployer who "
+            "follows it records the proxy's address as every applicant's "
+            "screening consent."
+        )
+
+
+def test_the_proxy_count_is_not_given_a_confident_default():
+    """Guessing 1 would be worse than leaving it wrong.
+
+    A deployment with no proxy that trusts one forwarded hop lets any client
+    set its own address, which turns a consent record from weak evidence into
+    forged evidence. The compose file may surface the variable; it must not
+    supply a value.
+    """
+    text = PROD.read_text(encoding="utf-8")
+    if "TRUSTED_PROXY_COUNT" not in text:
+        pytest.fail("TRUSTED_PROXY_COUNT is absent from the production compose file.")
+    for bad in ("TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}", "TRUSTED_PROXY_COUNT: 1"):
+        assert bad not in text, (
+            "The production compose assumes one proxy. That is a deployment "
+            "fact only the deployer knows, and assuming it makes forwarded "
+            "addresses trusted where none should be."
+        )

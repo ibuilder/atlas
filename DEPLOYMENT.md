@@ -98,6 +98,33 @@ deploy, it has just prevented the incident.
 | `STORAGE_BACKEND` | local | S3-compatible |
 | `LOG_FORMAT` | `console` | `json` for anything shipping to a log aggregator |
 | `FORCE_HTTPS` | on when deployed | Leave it on |
+| `TRUSTED_PROXY_COUNT` | `0` | **Set it if anything proxies you** — see below |
+
+#### `TRUSTED_PROXY_COUNT`, specifically
+
+The number of reverse proxies in front of Atlas, counted from the outside in.
+One TLS terminator is `1`; a load balancer *and* a terminator is `2`.
+
+The reference deployment binds the web port to loopback precisely so that a
+proxy is in front of it, which means this is not optional there. While it stays
+`0`, `remote_addr` is the proxy for every request, and that address is not
+decoration:
+
+- it is written into the **screening-consent record**, which is the evidence
+  FCRA requires that a particular person agreed to be screened — the same value
+  for every applicant is no evidence at all
+- it is the **per-address rate-limit key**, so the whole internet shares one
+  bucket
+- it is recorded on **every audit event**, on login history, and on
+  multi-factor recovery-code use
+- it is what an **IP-restricted API token** is checked against, so such a token
+  would accept every caller
+
+It defaults to `0` rather than `1` on purpose. Trusting `X-Forwarded-For` with
+no proxy in front lets any client name its own address, and a consent record
+somebody can forge is worse than one that is uniformly and obviously wrong.
+Getting this right is a deployment fact only you know, so Atlas refuses to
+guess it.
 
 ---
 

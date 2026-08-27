@@ -50,6 +50,20 @@ x-app: &app
     # allowed it would hand any origin an authenticated session.
     CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
 
+    # How many reverse proxies sit in front of this. The web port below is
+    # bound to loopback precisely so that one does, and until this matches
+    # reality every request appears to come from the proxy rather than from a
+    # person. That is not cosmetic: the address is written into the FCRA
+    # screening-consent record, into every audit event, into login history, and
+    # into the per-address rate-limit key. An IP-restricted API token would
+    # accept every caller, because they all look like the proxy.
+    #
+    # Left at 0 by default deliberately - trusting `X-Forwarded-For` with no
+    # proxy in front lets any client name its own address, and a spoofable
+    # consent record is worse than an obviously wrong one. Set it to the number
+    # of proxies you actually run, counted from the outside in.
+    TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
+
     LOG_FORMAT: json
 
     # Production refuses local disk for documents: it is not durable across
