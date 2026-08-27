@@ -1,30 +1,30 @@
-﻿# A deployable Atlas. Portable on purpose: anywhere Docker runs.
+# A deployable Atlas. Portable on purpose: anywhere Docker runs.
 #
 # Deliberately *not* an extension of docker-compose.yml. That file exists to
-# get a developer running in one command, and every convenience in it â€” a
-# default secret, an exposed database port, HTTPS off â€” is a liability here.
+# get a developer running in one command, and every convenience in it — a
+# default secret, an exposed database port, HTTPS off — is a liability here.
 # Layering overrides on top of it means a forgotten `-f` deploys the
 # development defaults, and that failure is silent. A separate file cannot be
 # half-applied.
 #
 #   cp .env.production.example .env.production
-#   # fill it in â€” see below; nothing here has a default that would boot
+#   # fill it in — see below; nothing here has a default that would boot
 #   docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 #
 # Every secret is `${VAR:?...}`: unset means compose refuses to start and says
-# which one. The application refuses too â€” see DEPLOYMENT.md Â§2 â€” but failing
+# which one. The application refuses too — see DEPLOYMENT.md §2 — but failing
 # at compose is a second earlier and names the variable rather than the config
 # field.
 #
 # What this does not do for you: TLS termination, backups, and log shipping.
-# See DEPLOYMENT.md Â§8. Put this behind a reverse proxy that terminates TLS.
+# See DEPLOYMENT.md §8. Put this behind a reverse proxy that terminates TLS.
 #
 # SPDX-License-Identifier: MIT
 
 name: atlas
 
 x-app: &app
-  image: ${ATLAS_IMAGE:-ghcr.io/ibuilder/atlas:0.7.0}
+  image: ${ATLAS_IMAGE:-ghcr.io/ibuilder/atlas:0.7.1}
   restart: unless-stopped
   environment: &app-env
     ATLAS_ENV: production
@@ -219,7 +219,7 @@ services:
   beat:
     <<: *app
     # Exactly one. Two beats double every scheduled job, and the jobs that
-    # matter here â€” delinquency notices, disposition deadlines â€” are ones
+    # matter here — delinquency notices, disposition deadlines — are ones
     # nobody wants sent twice.
     deploy:
       replicas: 1

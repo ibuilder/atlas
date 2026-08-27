@@ -133,3 +133,52 @@ def test_the_pinned_image_matches_the_package_version():
 
     assert declared in image, f"{image} does not carry version {declared}."
     assert __version__ == declared
+
+
+def test_no_tracked_text_file_carries_a_bom_or_mojibake():
+    """Encoding damage from a Windows shell round-trip, caught mechanically.
+
+    `docker-compose.prod.yml` was rewritten by a PowerShell `Set-Content` that
+    read it as UTF-8 and wrote it back as the system ANSI codepage. Every em
+    dash became `a-euro-quote` and the section sign became `A-section`, and the
+    file gained a byte-order mark. It was committed that way and survived two
+    releases, because nothing executes a comment and no reviewer diffs a file
+    for character corruption.
+
+    Cheap to assert, and the failure it prevents is a deployment guide that
+    looks like it was written by somebody careless.
+    """
+    import subprocess
+
+    listing = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        ["git", "ls-files"],  # noqa: S607 - git resolved from PATH, as elsewhere
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if listing.returncode != 0:
+        pytest.skip("not a git checkout")
+
+    suffixes = {".py", ".yml", ".yaml", ".md", ".toml", ".cfg", ".ini", ".txt", ".html", ".css"}
+    offenders: list[str] = []
+
+    for name in listing.stdout.splitlines():
+        path = ROOT / name
+        if path.suffix.lower() not in suffixes or not path.is_file():
+            continue
+        raw = path.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            offenders.append(f"{name}: byte-order mark")
+            continue
+        # The signature of UTF-8 misread as cp1252 and re-encoded: a run of
+        # non-ASCII that round-trips back through cp1252 into valid UTF-8.
+        text = raw.decode("utf-8", errors="replace")
+        for run in set(re.findall(r"[^\x00-\x7f]+", text)):
+            try:
+                repaired = run.encode("cp1252").decode("utf-8")
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                continue  # Genuinely non-ASCII, not damaged.
+            offenders.append(f"{name}: {run!r} should be {repaired!r}")
+
+    assert not offenders, "Encoding damage in tracked files:\n  " + "\n  ".join(sorted(offenders))

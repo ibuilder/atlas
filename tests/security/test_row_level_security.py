@@ -1,12 +1,12 @@
 """Row-level security: the third isolation layer.
 
-PostgreSQL only. Skipped on SQLite, which has no equivalent â€” and the skip is
+PostgreSQL only. Skipped on SQLite, which has no equivalent — and the skip is
 loud rather than silent, because "these tests passed" must never mean "these
 tests did not run".
 
 The interesting assertion is the last one: a **raw SQL** query, bypassing the
 ORM entirely, still cannot see another tenant's rows. That is the whole point of
-this layer â€” layers one and two only protect paths that go through them.
+this layer — layers one and two only protect paths that go through them.
 
 SPDX-License-Identifier: MIT
 """

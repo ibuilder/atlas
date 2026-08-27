@@ -10,6 +10,66 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-08-17
+
+A same-day fix release. 0.7.0's headline feature did not work, and its own
+release pipeline half-finished. Both are corrected here, so 0.7.0 should be
+skipped rather than deployed.
+
+### Fixed
+
+- **The embeddable enquiry form rejected every real submission.** The POST
+  handler required the `Origin` header to be one of the embedding site's
+  allow-listed origins. It never is: the form is served from Atlas's origin and
+  posts back to it, so the submission is same-origin and a browser sends Atlas's
+  own host — or omits the header entirely, as Firefox does for same-origin
+  posts. The embedding site is not party to that request at all. Every genuine
+  enquiry returned 404.
+
+  The test suite passed because all sixteen `Origin` usages forged the header,
+  so the tests encoded the same wrong assumption as the code rather than
+  checking it. Both are corrected, and a parametrised regression now covers the
+  two shapes that really arrive.
+
+  `frame-ancestors` is what actually confines the form and was already correct.
+  What *can* be verified server-side is where the form was rendered, so the
+  embedding origin is now read from the referrer at render time — the only
+  moment it is knowable — and sealed into the signed token. A recorded origin
+  outside the allowlist is dropped; an absent one is accepted, because referrers
+  are withheld routinely and attribution is not worth losing a lead over. Lead
+  attribution consequently survives, and cannot be asserted by the submitter.
+- **`capture_lead` trusted caller-supplied `property_id` and `unit_id`.** Latent
+  — no caller passes one — but PostgreSQL does not apply row-level security to
+  foreign-key checks, so a reference to another tenant's property would have
+  inserted cleanly instead of failing closed, and the ORM guard would not have
+  objected because the write itself is correctly scoped. Both are now verified
+  against the key's organization and refused rather than silently nulled.
+- **The SBOM step asked the registry for a tag nobody published.** `v0.7.0`
+  built and pushed its image correctly, then failed generating the SBOM and took
+  the vulnerability scan and the draft release down behind it: the step asked for
+  `:v0.7.0` while `docker/metadata-action` had published `:0.7.0`, stripping the
+  `v` from the semver pattern. Both post-build steps now address the image by
+  the digest the build emits, which pins the exact artifact rather than
+  reconstructing a name built elsewhere.
+- **Encoding damage in four tracked files.** A PowerShell `Set-Content` read
+  them as UTF-8 and wrote them back as the system ANSI codepage, turning every
+  em dash into `â€"` and adding byte-order marks. `docker-compose.prod.yml` and
+  `DEPLOYMENT.md` are the two a deployer actually reads, and it survived two
+  releases because nothing executes a comment.
+
+### Added
+
+- **`tests/unit/test_release_workflow.py`** — reads the release workflow as
+  data: no step may build a registry reference out of `github.ref_name`, the
+  post-build steps must address the image by digest, and the scan must stay
+  non-gating so a base-image CVE published between build and scan is visible
+  rather than a reason a tagged release silently does not exist. A release
+  workflow runs once per version, on somebody else's machine, and reports its
+  mistakes by half-finishing.
+- **An encoding guard over every tracked text file** — no byte-order marks, and
+  no runs that round-trip back through cp1252 into valid UTF-8, which is the
+  signature of exactly this damage.
+
 ## [0.7.0] - 2026-08-17
 
 The first release with a published image. 0.6.0 below was tagged in this file
@@ -22,7 +82,7 @@ contents are carried forward here instead.
 
 ### Added
 
-- **Embeddable enquiry form** (`0.7.1`). An `<iframe>` snippet an operator
+- **Embeddable enquiry form** (roadmap item 7.1). An `<iframe>` snippet an operator
   pastes into their own website; submissions arrive as leads in the existing
   funnel. Managed at `/admin/embed-forms` behind `integration.manage`.
 
@@ -30,9 +90,14 @@ contents are carried forward here instead.
   feature. The publishable key names the organization — resolved through
   `unscoped` before any tenant context exists — so a submission cannot claim
   one. Framing is allow-listed per key via `frame-ancestors`, and a key with no
-  origins frames nowhere rather than everywhere. `Origin` is verified on write.
-  A honeypot field and a signed render token carrying a fill-time floor drop
-  automation, which then receives the same thank-you page a person does.
+  origins frames nowhere rather than everywhere. A honeypot field and a signed
+  render token carrying a fill-time floor drop automation, which then receives
+  the same thank-you page a person does.
+
+  > This entry originally also claimed `Origin` was verified on write. It was,
+  > and that check is what made the form reject every genuine enquiry — see
+  > 0.7.1. The claim is struck rather than left standing, because a changelog
+  > describing a control that never worked is worse than one that admits it.
 
   An iframe rather than a script tag, deliberately: serving from Atlas's origin
   means an enquirer types into Atlas, so a cross-site scripting flaw on the
@@ -941,7 +1006,8 @@ The first release: an enterprise core that runs, migrates, and is tested.
 - Aggregate queries (`SELECT count(*)`) are scoped explicitly, closing a gap
   that ORM loader criteria alone do not cover.
 
-[Unreleased]: https://github.com/ibuilder/atlas/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/ibuilder/atlas/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/ibuilder/atlas/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/ibuilder/atlas/compare/v0.5.0...v0.7.0
 [0.5.0]: https://github.com/ibuilder/atlas/compare/v0.1.0...v0.5.0
 [0.1.0]: https://github.com/ibuilder/atlas/releases/tag/v0.1.0
