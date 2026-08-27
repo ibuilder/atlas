@@ -10,11 +10,16 @@ codes and the `/api/v1` namespace are already treated as stable.
 
 ## [Unreleased]
 
-## [0.7.1] - 2026-08-17
+## [0.7.1] - 2026-08-27
 
-A same-day fix release. 0.7.0's headline feature did not work, and its own
-release pipeline half-finished. Both are corrected here, so 0.7.0 should be
-skipped rather than deployed.
+A fix release. 0.7.0's headline feature did not work, and its own release
+pipeline half-finished. Both are corrected here, so 0.7.0 should be skipped
+rather than deployed.
+
+Ten days of it being wrong is the part worth recording. The form was broken in
+every deployment from the moment 0.7.0 published, and nothing reported it: the
+test suite was green, because it forged the header it was meant to be checking.
+The bug surfaced only when the feature was read back deliberately.
 
 ### Fixed
 
