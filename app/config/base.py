@@ -206,9 +206,6 @@ class Settings(BaseSettings):
     smtp_username: str = ""
     smtp_password: SecretStr = SecretStr("")
     smtp_use_tls: bool = True
-    sms_backend: Literal["console", "memory", "http"] = "console"
-    payments_backend: Literal["mock", "http"] = "mock"
-    screening_backend: Literal["mock", "http"] = "mock"
     esign_backend: Literal["mock", "http"] = "mock"
 
     # Uploads are quarantined until scanned either way; this decides what does

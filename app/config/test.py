@@ -41,7 +41,6 @@ class TestSettings(Settings):
     malware_scan_required: bool = False
     metrics_enabled: bool = False
     mail_backend: str = "memory"  # type: ignore[assignment]
-    sms_backend: str = "memory"  # type: ignore[assignment]
     storage_backend: str = "local"  # type: ignore[assignment]
 
     # Fast KDF parameters - tests assert on behaviour, not on work factor.

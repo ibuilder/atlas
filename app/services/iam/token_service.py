@@ -35,20 +35,45 @@ TOKEN_PREFIX = "atlas_api"
 PREFIX_DISPLAY_LENGTH = 12
 
 
+#: The fallback when no application is bound - a Celery task or a unit test
+#: constructing a token outside a request. Matches the setting's own default so
+#: the two cannot drift apart silently.
+FALLBACK_TTL_DAYS = 90
+
+
+def _configured_ttl_days() -> int:
+    """Read API_TOKEN_TTL_DAYS, tolerating no application context."""
+    try:
+        from flask import current_app
+
+        return int(current_app.config["SETTINGS"].api_token_ttl_days)
+    except (RuntimeError, KeyError, AttributeError):
+        return FALLBACK_TTL_DAYS
+
+
 def issue_api_token(
     *,
     user: User,
     name: str,
     scopes: list[str] | None = None,
     allowed_ips: list[str] | None = None,
-    ttl_days: int = 90,
+    ttl_days: int | None = None,
     session: Session | None = None,
 ) -> tuple[ApiToken, str]:
-    """Mint a token. The plaintext is returned once and never stored."""
+    """Mint a token. The plaintext is returned once and never stored.
+
+    ``ttl_days`` defaults to ``API_TOKEN_TTL_DAYS`` rather than to a literal.
+    It carried a hardcoded 90 that happened to match the setting's default, so
+    an operator tightening the window for a compliance requirement changed
+    nothing and had no way to tell - the worst shape a security knob can take.
+    """
     if session is None:
         from app.extensions import current_session
 
         session = current_session()
+
+    if ttl_days is None:
+        ttl_days = _configured_ttl_days()
 
     for cidr in allowed_ips or []:
         # Validate now: a malformed CIDR that silently never matches would lock
