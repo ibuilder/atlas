@@ -56,7 +56,40 @@ class ProductionSettings(Settings):
                 "trace is a task traceback nobody is watching."
             )
         self._require_routable_sender()
+        self._require_reachable_app_url()
         return self
+
+    def _require_reachable_app_url(self) -> None:
+        """APP_URL has to be the address people can actually reach.
+
+        It is not decoration: it builds the password-reset link in
+        ``services/notifications/mailer.py`` and the server URL advertised by
+        the OpenAPI document. Left at its development default, a deployment
+        boots cleanly, sends reset mail that points at ``localhost:5000``, and
+        the person clicking it is by definition already locked out — so the
+        failure lands on the one user least able to report it usefully.
+
+        HTTPS is required rather than merely preferred because production
+        forces it: a plain-HTTP link redirects, and a reset token that travels
+        through a redirect has been in a request that was sent in the clear.
+        """
+        url = self.app_url.strip().rstrip("/")
+        if not url:
+            raise ConfigError("APP_URL is unset; password reset links have nowhere to point.")
+
+        if not url.startswith("https://"):
+            raise ConfigError(
+                f"APP_URL must be an https:// address in production; got {url!r}. "
+                "Production forces HTTPS, and a reset token that travels through "
+                "the redirect has already been sent in the clear."
+            )
+
+        host = url[len("https://") :].split("/", 1)[0].split(":", 1)[0].lower()
+        if host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".localhost"):
+            raise ConfigError(
+                f"APP_URL is still the development default ({url!r}). Every "
+                "password-reset link would point at the recipient's own machine."
+            )
 
     def _require_routable_sender(self) -> None:
         """MAIL_FROM has to name a domain the operator actually controls.

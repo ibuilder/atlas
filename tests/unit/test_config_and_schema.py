@@ -40,6 +40,10 @@ def _production(**overrides):
         # boot refusal rather than a runtime surprise.
         "smtp_host": "smtp.example.com",
         "mail_from": "no-reply@atlas-pmos.io",
+        # Builds the password-reset link. Production refuses the development
+        # default, because a reset mail pointing at localhost reaches somebody
+        # who is already locked out.
+        "app_url": "https://atlas.example-realty.com",
     }
     base.update(overrides)
     return ProductionSettings(**base)

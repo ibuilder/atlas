@@ -81,6 +81,10 @@ These are `ConfigError` at startup, not warnings:
   cannot pass SPF, and the receiving server's rejection never travels back, so
   Atlas records the notice as sent while the recipient never sees it
 - `MFA_REQUIRED_FOR_PRIVILEGED` disabled
+- `APP_URL` unset, plain HTTP, or pointing at localhost — it builds the
+  password-reset link and the OpenAPI server URL, so the development default
+  sends reset mail to `localhost:5000`, and the person who clicks it is by
+  definition already locked out
 - A non-PostgreSQL `DATABASE_URL`, or a Redis URL that is really an in-memory cache
 
 Failing to start is cheaper than failing open. If one of these bites during a

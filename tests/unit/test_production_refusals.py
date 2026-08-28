@@ -42,6 +42,9 @@ BASE = {
     # a reserved one cannot pass SPF; the SMTP relay host is not, since that is
     # a hostname Atlas connects out to rather than one recipients check.
     "MAIL_FROM": "no-reply@atlas-pmos.io",
+    # Builds the password-reset link; production refuses localhost and
+    # plain HTTP, so the control environment has to carry a real one.
+    "APP_URL": "https://atlas.example-realty.com",
 }
 
 
@@ -82,6 +85,12 @@ def test_a_complete_production_environment_boots(monkeypatch):
         ({"MAIL_FROM": '"Atlas" <no-reply@example.org>'}, "reserved domain"),
         ({"MAIL_FROM": "not-an-address"}, "usable address"),
         ({"MAIL_FROM": ""}, "usable address"),
+        # The development default. A reset link nobody can click, sent to
+        # the one person who is already locked out.
+        ({"APP_URL": "http://localhost:5000"}, "APP_URL"),
+        ({"APP_URL": "https://localhost:8000"}, "development default"),
+        ({"APP_URL": "http://atlas.example-realty.com"}, "https"),
+        ({"APP_URL": ""}, "APP_URL"),
     ],
 )
 def test_production_refuses(monkeypatch, override, fragment):
@@ -112,6 +121,7 @@ def test_production_refuses(monkeypatch, override, fragment):
         "MAIL_FROM",
         "SMTP_HOST",
         "MFA_REQUIRED_FOR_PRIVILEGED",
+        "APP_URL",
     ],
 )
 def test_the_deployment_guide_names_every_refusal(setting):

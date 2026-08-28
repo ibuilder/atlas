@@ -64,6 +64,12 @@ x-app: &app
     # of proxies you actually run, counted from the outside in.
     TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-0}
 
+    # The address people reach this at. Builds the password-reset link and the
+    # server URL in the OpenAPI document, so a wrong value is not cosmetic: the
+    # reset mail points somewhere unreachable, and whoever clicks it is already
+    # locked out. Production refuses a localhost or plain-HTTP value.
+    APP_URL: ${APP_URL:?set APP_URL}
+
     LOG_FORMAT: json
 
     # Production refuses local disk for documents: it is not durable across
