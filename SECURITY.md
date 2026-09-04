@@ -22,12 +22,36 @@ stays within your own deployment.
 | MFA | TOTP with replay protection; sensitive actions require a *fresh* assertion. |
 | Session control | Server-side, individually revocable; all sessions die on password change. |
 | Field encryption | MFA seeds, tax identifiers, government IDs, bank details. Keys rotate without downtime. |
-| Transport and headers | HSTS, a CSP with no `unsafe-inline`, `nosniff`, `DENY` framing, isolated cross-origin policies. |
+| Transport and headers | HSTS, a CSP with no `unsafe-inline`, `nosniff`, `DENY` framing everywhere except the embeddable enquiry form, which carries a per-key `frame-ancestors` allowlist and frames nowhere without one. Isolated cross-origin policies. |
 | Input validation | Strict schemas that reject unknown fields; HTML stripped at the boundary. |
 | Rate limiting | Per identity when authenticated, per IP otherwise. |
 | Idempotency | Retried writes replay; the same key with a different body is rejected. |
 | Outbound webhooks | HMAC-SHA256 signatures with the timestamp inside the signed string; customer-supplied URLs are refused when they resolve to private, loopback, or link-local addresses. |
 | Secrets | Configuration only, typed as `SecretStr`. Production refuses to start on a weak or placeholder secret. |
+
+## Dependencies
+
+Atlas acquires code it did not write in three ways, and Dependabot watches all
+three — Python packages, the actions the workflows run, and the container base
+image. See [`.github/dependabot.yml`](.github/dependabot.yml);
+`tests/unit/test_dependabot_config.py` fails the build if a new Dockerfile or
+manifest appears without coverage.
+
+Routine minor and patch updates are grouped into one pull request per ecosystem
+per week. Majors for Flask, SQLAlchemy, and pydantic are deliberately excluded:
+`pyproject.toml` carries upper bounds for them because a major is a migration
+with its own testing story, not a bump to merge on a Monday.
+
+`pip-audit` runs in CI, and Trivy scans the published image at release. Both
+report rather than gate, so a CVE disclosed between a build and a scan is
+visible instead of being the reason a tagged release silently does not exist.
+
+> **Version updates and security updates are separate switches**, and confusing
+> them is easy once this file exists. `dependabot.yml` configures the former.
+> The latter — the ones that react to a published advisory — require **Dependabot
+> alerts and security updates** to be enabled under *Settings → Code security*.
+> They are off for this repository at the time of writing, so nothing currently
+> reacts to a CVE automatically.
 
 ## Deployment expectations
 

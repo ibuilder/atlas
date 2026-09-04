@@ -1,0 +1,87 @@
+# Dependency updates.
+#
+# Three ecosystems, because Atlas has three ways to acquire code it did not
+# write: Python packages, the actions its workflows run, and the base image the
+# container is built from. A repository that watches only the first is watching
+# the one place a human already reviews.
+#
+# Note that this file configures *version* updates only. Security updates are a
+# separate switch in Settings -> Code security, and Dependabot alerts are off
+# for this repository at time of writing - so nothing here reacts to a
+# published CVE until that is turned on. The two are easy to confuse, and
+# having this file present makes it easier still.
+#
+# SPDX-License-Identifier: MIT
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------- Python
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      # Matches the conventional-commit style the rest of the history uses, so
+      # these do not stand out as machine-written noise in `git log`.
+      prefix: fix(deps)
+      prefix-development: chore(deps)
+    labels:
+      - dependencies
+    groups:
+      # One pull request for the routine drift rather than fifteen. Majors stay
+      # separate: `pyproject.toml` pins upper bounds deliberately, and a major
+      # is a decision rather than an upgrade.
+      python-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # These carry their own upper bounds in pyproject.toml for a reason - a
+      # major is a framework migration, not a dependency bump.
+      - dependency-name: Flask
+        update-types: [version-update:semver-major]
+      - dependency-name: SQLAlchemy
+        update-types: [version-update:semver-major]
+      - dependency-name: pydantic
+        update-types: [version-update:semver-major]
+
+  # --------------------------------------------------------- GitHub Actions
+  # The ecosystem most likely to rot unnoticed: an action pinned to a major tag
+  # keeps working for years while its runtime is deprecated underneath it. The
+  # release workflow already warns that six actions are being forced onto
+  # Node 24 because they target Node 20.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci(deps)
+    labels:
+      - dependencies
+      - ci
+    groups:
+      actions-all:
+        patterns: ["*"]
+
+  # ----------------------------------------------------------- Base image
+  # `python:3.12-slim-bookworm` is where most of the container's CVE surface
+  # lives, and none of it appears in pyproject.toml. Trivy reports on it at
+  # release time without gating; this is what actually proposes the fix.
+  - package-ecosystem: docker
+    directory: /infra/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: fix(docker)
+    labels:
+      - dependencies
+      - docker
