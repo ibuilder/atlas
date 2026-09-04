@@ -53,7 +53,7 @@ postgres = ["psycopg[binary]>=3.2,<4"]
 reports = ["openpyxl>=3.1,<4"]
 #: SAML signature verification. Deliberately not hand-rolled: a subtly wrong
 #: XML-DSIG implementation accepts forged assertions while appearing to work.
-saml = ["signxml>=4.0,<5", "lxml>=5.2,<7"]
+saml = ["signxml>=4.0,<6", "lxml>=5.2,<7"]
 dev = [
   "pytest>=8.3,<10",
   "pytest-cov>=5,<8",
@@ -66,7 +66,7 @@ dev = [
   "pytest-timeout>=2.3,<3",
   "types-bleach",
   "types-python-dateutil",
-  "signxml>=4.0,<5",
+  "signxml>=4.0,<6",
   "lxml>=5.2,<7",
   "openpyxl>=3.1,<4",
 ]
