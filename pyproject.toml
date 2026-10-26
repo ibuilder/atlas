@@ -43,7 +43,7 @@ dependencies = [
   "gunicorn>=23,<27",
   "prometheus-client>=0.21,<1",
   "bleach>=6.1,<7",
-  "python-dateutil>=2.9,<3",
+  "python-dateutil>=2.9,<4",
   "PyJWT>=2.9,<3",
 ]
 
